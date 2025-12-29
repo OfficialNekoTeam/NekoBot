@@ -171,6 +171,11 @@ class BasePlatform(ABC):
             if self.last_error
             else None,
             "unified_webhook": self.unified_webhook(),
+            "messageStats": {
+                "sent": self._message_count,
+                "received": self._message_count,
+                "error": len(self._errors),
+            },
             "messages": self._message_count,
             "previous_messages": self._previous_message_count,
         }

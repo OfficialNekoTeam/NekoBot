@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth';
 import {
@@ -23,7 +23,6 @@ import {
 import {
   Visibility,
   VisibilityOff,
-  Pets as PetsIcon,
 } from '@mui/icons-material';
 import { z } from 'zod';
 
@@ -57,6 +56,24 @@ const Login: React.FC = () => {
     password: '',
     remember: false,
   });
+
+  // 加载记住的登录凭证
+  useEffect(() => {
+    try {
+      const remembered = localStorage.getItem('remembered_credentials');
+      if (remembered) {
+        const credentials = JSON.parse(remembered);
+        setFormData(prev => ({
+          ...prev,
+          username: credentials.username || '',
+          password: credentials.password || '',
+          remember: true,
+        }));
+      }
+    } catch (error) {
+      console.error('加载记住的凭证失败:', error);
+    }
+  }, []);
 
   const handleClickShowPassword = () => {
     setShowPassword(!showPassword);
@@ -92,7 +109,7 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      const success = await login(formData.username, formData.password);
+      const success = await login(formData.username, formData.password, formData.remember);
       if (success) {
         // 登录成功，跳转到仪表盘
         navigate('/dashboard');
@@ -137,12 +154,11 @@ const Login: React.FC = () => {
                 sx={{
                   width: 64,
                   height: 64,
-                  bgcolor: 'primary.main',
                   boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)',
                   mb: 2,
                 }}
               >
-                <PetsIcon sx={{ fontSize: 36 }} />
+                <img src="/logo.svg" alt="NekoBot" style={{ width: '100%', height: '100%' }} />
               </Avatar>
               <Typography component="h1" variant="h4" sx={{ fontWeight: 600 }}>
                 NekoBot 登录

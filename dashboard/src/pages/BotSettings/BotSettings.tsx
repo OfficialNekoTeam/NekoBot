@@ -6,7 +6,6 @@ import {
   CardContent,
   TextField,
   Button,
-  Switch,
   Alert,
   CircularProgress,
   Stack,
@@ -205,22 +204,6 @@ const BotSettings: React.FC = () => {
                     borderRadius: 2,
                   },
                 }}
-              />
-            </Box>
-
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, bgcolor: 'background.default', borderRadius: 2 }}>
-              <Box>
-                <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                  Demo 模式
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  启用后将以演示模式运行
-                </Typography>
-              </Box>
-              <Switch
-                checked={config?.demo || false}
-                onChange={(e) => setConfig({ ...config, demo: e.target.checked })}
-                color="primary"
               />
             </Box>
 

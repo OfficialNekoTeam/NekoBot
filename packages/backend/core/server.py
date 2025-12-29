@@ -11,7 +11,7 @@ from typing import Dict, Any
 from loguru import logger
 
 from .config import load_config
-from .plugin_manager import PluginManager
+from .plugin_manager import plugin_manager
 from ..platform import PlatformManager
 from .pipeline import (
     PipelineScheduler,
@@ -28,9 +28,6 @@ from .pipeline import (
 
 # 加载全局配置
 CONFIG = load_config()
-
-# 初始化插件管理器
-plugin_manager = PluginManager()
 
 # 初始化平台管理器
 platform_manager = PlatformManager()

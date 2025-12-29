@@ -90,7 +90,9 @@ const Layout: React.FC<LayoutProps> = ({ darkMode = true, onDarkModeChange }) =>
           component="main"
           sx={{
             flexGrow: 1,
-            p: 3,
+            pt: '64px',
+            px: 3,
+            pb: 3,
             transition: (theme) => theme.transitions.create('margin', {
               easing: theme.transitions.easing.sharp,
               duration: theme.transitions.duration.leavingScreen,

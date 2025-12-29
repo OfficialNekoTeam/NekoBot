@@ -215,8 +215,9 @@ class PluginManager:
         """返回插件的基本信息字典"""
         plugin = self.plugins.get(name)
         if not plugin:
+            logger.warning(f"Plugin {name} not found in plugins dict")
             return None
-        return {
+        info = {
             "name": plugin.name,
             "version": plugin.version,
             "description": plugin.description,
@@ -225,10 +226,18 @@ class PluginManager:
             "commands": list(plugin.commands.keys()),
             "is_official": name in self.official_plugins,
         }
+        logger.debug(f"Plugin info for {name}: {info}")
+        return info
 
     def get_all_plugins_info(self) -> Dict[str, Dict[str, Any]]:
         """返回所有已加载插件的信息"""
-        return {name: self.get_plugin_info(name) for name in self.plugins}
+        result = {}
+        for name in self.plugins:
+            info = self.get_plugin_info(name)
+            if info:
+                result[name] = info
+        logger.info(f"get_all_plugins_info returning {len(result)} plugins: {list(result.keys())}")
+        return result
 
     async def handle_message(self, message: Any) -> None:
         """分发收到的消息给所有已启用插件的 on_message 方法"""

@@ -12,7 +12,7 @@ export interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isDemo: boolean;
-  login: (username: string, password: string) => Promise<boolean>;
+  login: (username: string, password: string, remember?: boolean) => Promise<boolean>;
   logout: () => void;
   changePassword: (oldPassword: string, newPassword: string) => Promise<boolean>;
 }
@@ -62,7 +62,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }, 0);
   }, [API_URL]);
 
-  const login = async (username: string, _password: string): Promise<boolean> => {
+  const login = async (username: string, _password: string, remember: boolean = false): Promise<boolean> => {
     try {
       const response = await fetch(`${API_URL}/api/login`, {
         method: 'POST',
@@ -81,6 +81,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         setUser(userData);
         setIsAuthenticated(true);
+        
+        // 如果勾选了记住密码，保存凭证
+        if (remember) {
+          localStorage.setItem('remembered_credentials', JSON.stringify({ username, password: _password }));
+        } else {
+          // 如果没有勾选记住密码，清除之前保存的凭证
+          localStorage.removeItem('remembered_credentials');
+        }
         
         return true;
       }
@@ -115,6 +123,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = () => {
     localStorage.removeItem('user');
     localStorage.removeItem('token');
+    localStorage.removeItem('remembered_credentials');
     setUser(null);
     setIsAuthenticated(false);
   };

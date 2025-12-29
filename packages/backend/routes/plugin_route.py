@@ -34,6 +34,9 @@ class PluginRoute(Route):
         """获取所有插件列表"""
         try:
             plugins_info = plugin_manager.get_all_plugins_info()
+            logger.info(f"Plugin manager has {len(plugin_manager.plugins)} plugins")
+            logger.info(f"Plugin manager enabled: {plugin_manager.enabled_plugins}")
+            logger.info(f"Plugins info: {plugins_info}")
             return Response().ok(data=plugins_info).to_dict()
         except Exception as e:
             logger.error(f"获取插件列表失败: {e}")

@@ -59,11 +59,12 @@ interface PlatformAdapter {
 
 interface PlatformStats {
   [platformId: string]: {
-    name: string;
+    name?: string;
+    display_name?: string;
     type: string;
-    enabled: boolean;
+    enabled?: boolean;
     status: 'online' | 'offline' | 'error';
-    description: string;
+    description?: string;
     config: {
       host: string;
       port: number;
@@ -101,7 +102,13 @@ const Platforms: React.FC = () => {
         if (response.status === 'success' && response.data) {
           const platformList = Object.entries(response.data).map(([id, p]) => ({
             id,
-            ...p,
+            name: p.name || p.display_name || `Platform ${id}`,
+            type: p.type || 'unknown',
+            enabled: p.enabled ?? true,
+            status: p.status || 'offline',
+            description: p.description || '',
+            config: p.config || { host: '', port: 0, commandPrefix: '' },
+            messageStats: p.messageStats || { sent: 0, received: 0, error: 0 },
           })) as PlatformAdapter[];
           setPlatforms(platformList);
         }
@@ -321,7 +328,7 @@ const Platforms: React.FC = () => {
                 消息总数
               </Typography>
               <Typography variant="h4" sx={{ fontWeight: 600 }}>
-                {platforms.reduce((sum, p) => sum + p.messageStats.sent + p.messageStats.received, 0)}
+                {platforms.reduce((sum, p) => sum + (p.messageStats?.sent ?? 0) + (p.messageStats?.received ?? 0), 0)}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 所有平台消息统计
@@ -348,8 +355,8 @@ const Platforms: React.FC = () => {
               </Typography>
               <Typography variant="h4" sx={{ fontWeight: 600, color: 'error.main' }}>
                 {platforms.length > 0 ?
-                  `${((platforms.reduce((sum, p) => sum + p.messageStats.error, 0) /
-                    platforms.reduce((sum, p) => sum + p.messageStats.sent + p.messageStats.received, 1)) * 100).toFixed(2)}%` : '0%'}
+                  `${((platforms.reduce((sum, p) => sum + (p.messageStats?.error ?? 0), 0) /
+                    platforms.reduce((sum, p) => sum + (p.messageStats?.sent ?? 0) + (p.messageStats?.received ?? 0), 1)) * 100).toFixed(2)}%` : '0%'}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 消息处理错误率
@@ -407,14 +414,14 @@ const Platforms: React.FC = () => {
                         color: 'white',
                         fontWeight: 600,
                       }}>
-                        {platform.name.charAt(0)}
+                        {platform.name?.charAt(0) || '?'}
                       </Box>
                       <Stack>
                         <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                          {platform.name}
+                          {platform.name || 'Unknown'}
                         </Typography>
                         <Typography variant="body2" color="text.secondary">
-                          {platform.description}
+                          {platform.description || '暂无描述'}
                         </Typography>
                       </Stack>
                     </Stack>
@@ -430,7 +437,7 @@ const Platforms: React.FC = () => {
                       fontSize: '0.75rem',
                       fontWeight: 600,
                     }}>
-                      {platform.type}
+                      {platform.type || 'unknown'}
                     </Box>
                   </TableCell>
                   <TableCell sx={{ py: 2.5 }}>
@@ -452,15 +459,15 @@ const Platforms: React.FC = () => {
                     <Stack direction="row" spacing={3}>
                       <Box sx={{ textAlign: 'center' }}>
                         <Typography variant="body2" color="text.secondary">发送</Typography>
-                        <Typography variant="body1" sx={{ fontWeight: 600 }}>{platform.messageStats.sent}</Typography>
+                        <Typography variant="body1" sx={{ fontWeight: 600 }}>{platform.messageStats?.sent ?? 0}</Typography>
                       </Box>
                       <Box sx={{ textAlign: 'center' }}>
                         <Typography variant="body2" color="text.secondary">接收</Typography>
-                        <Typography variant="body1" sx={{ fontWeight: 600 }}>{platform.messageStats.received}</Typography>
+                        <Typography variant="body1" sx={{ fontWeight: 600 }}>{platform.messageStats?.received ?? 0}</Typography>
                       </Box>
                       <Box sx={{ textAlign: 'center' }}>
                         <Typography variant="body2" color="text.secondary">错误</Typography>
-                        <Typography variant="body1" sx={{ fontWeight: 600, color: 'error.main' }}>{platform.messageStats.error}</Typography>
+                        <Typography variant="body1" sx={{ fontWeight: 600, color: 'error.main' }}>{platform.messageStats?.error ?? 0}</Typography>
                       </Box>
                     </Stack>
                   </TableCell>

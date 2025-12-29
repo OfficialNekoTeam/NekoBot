@@ -10,7 +10,6 @@ import {
   MenuItem,
   Avatar,
   Tooltip,
-  Switch,
   ListItemText,
 } from '@mui/material';
 import {
@@ -66,9 +65,9 @@ const TopNav: React.FC<TopNavProps> = ({ darkMode = true, onDarkModeChange }) =>
     navigate('/dashboard/change-password');
   };
 
-  const handleDarkModeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDarkModeChange = () => {
     if (onDarkModeChange) {
-      onDarkModeChange(event.target.checked);
+      onDarkModeChange(!darkMode);
     }
   };
 
@@ -92,14 +91,12 @@ const TopNav: React.FC<TopNavProps> = ({ darkMode = true, onDarkModeChange }) =>
         </Tooltip>
 
         <Tooltip title={darkMode ? "切换到浅色模式" : "切换到深色模式"}>
-          <IconButton color="inherit" sx={{ p: 0.5 }}>
-            <Switch
-              checked={darkMode}
-              onChange={handleDarkModeChange}
-              icon={<LightModeIcon />}
-              checkedIcon={<DarkModeIcon />}
-              size="small"
-            />
+          <IconButton
+            color="inherit"
+            onClick={handleDarkModeChange}
+            sx={{ p: 0.5 }}
+          >
+            {darkMode ? <LightModeIcon /> : <DarkModeIcon />}
           </IconButton>
         </Tooltip>
 
