@@ -1,0 +1,257 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  line-height: 1.6;
+  font-weight: 400;
+  
+  /* 现代渐变色主题 - 参考 Astrbot 风格 */
+  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --gradient-secondary: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  --gradient-success: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  --gradient-warning: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+  --gradient-info: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+  
+  /* 主题颜色变量 */
+  --palette-primary-main: #667eea;
+  --palette-primary-light: #818cf8;
+  --palette-primary-dark: #4f46e5;
+  --palette-secondary-main: #764ba2;
+  --palette-secondary-light: #a78bfa;
+  --palette-secondary-dark: #7c3aed;
+  --palette-success-main: #00f2fe;
+  --palette-success-light: #4facfe;
+  --palette-success-dark: #059669;
+  --palette-error-main: #f5576c;
+  --palette-error-light: #fa709a;
+  --palette-error-dark: #dc2626;
+  --palette-warning-main: #fee140;
+  --palette-warning-light: #fbbf24;
+  --palette-warning-dark: #d97706;
+  --palette-info-main: #a8edea;
+  --palette-info-light: #60a5fa;
+  --palette-info-dark: #2563eb;
+  --palette-grey-50: #f8fafc;
+  --palette-grey-100: #f1f5f9;
+  --palette-grey-200: #e2e8f0;
+  --palette-grey-300: #cbd5e1;
+  --palette-grey-400: #94a3b8;
+  --palette-grey-500: #64748b;
+  --palette-grey-600: #475569;
+  --palette-grey-700: #334155;
+  --palette-grey-800: #1e293b;
+  --palette-grey-900: #0f172a;
+  --palette-text-primary: #1e293b;
+  --palette-text-secondary: #64748b;
+  --palette-background-paper: #ffffff;
+  --palette-background-default: #f8fafc;
+  --palette-divider: #e2e8f0;
+  
+  /* 玻璃态效果 */
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.2);
+  --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  color: var(--palette-text-primary);
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+/* 深色模式 */
+body.dark-mode {
+  --palette-text-primary: #f1f5f9;
+  --palette-text-secondary: #94a3b8;
+  --palette-background-paper: rgba(30, 41, 59, 0.8);
+  --palette-background-default: #0f172a;
+  --palette-divider: #334155;
+  --glass-bg: rgba(15, 23, 42, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+/* 滚动条样式 - 现代化设计 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--palette-primary-main), var(--palette-secondary-main));
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: all 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--palette-primary-light), var(--palette-secondary-light));
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* 深色模式滚动条 */
+body.dark-mode ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--palette-primary-dark), var(--palette-secondary-dark));
+}
+
+/* 过渡效果 - 更流畅 */
+* {
+  transition: background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 动画关键帧 - 现代化 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* 应用动画 */
+.fade-in {
+  animation: fadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.slide-in {
+  animation: slideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.scale-in {
+  animation: scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.float-animation {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* 玻璃态卡片效果 */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  border-radius: 16px;
+}
+
+/* 卡片悬停效果 - 现代化 */
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-hover:hover {
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 20px 40px -10px rgba(102, 126, 234, 0.15),
+              0 10px 20px -5px rgba(118, 75, 162, 0.1);
+}
+
+/* 按钮悬停效果增强 */
+button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px -4px rgba(102, 126, 234, 0.3);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 4px 8px -2px rgba(102, 126, 234, 0.2);
+}
+
+/* 渐变按钮 */
+.gradient-button {
+  background: var(--gradient-primary);
+  border: none;
+  color: white;
+  font-weight: 600;
+  padding: 12px 24px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.gradient-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px -5px rgba(102, 126, 234, 0.4);
+}
+
+.gradient-button:active {
+  transform: translateY(0);
+}
+
+/* 加载动画 */
+.loading-shimmer {
+  background: linear-gradient(90deg,
+    var(--palette-grey-200) 0%,
+    var(--palette-grey-100) 50%,
+    var(--palette-grey-200) 100%);
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
