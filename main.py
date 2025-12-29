@@ -7,6 +7,7 @@ from loguru import logger
 import sys
 import asyncio
 import argparse
+import getpass
 
 logger.remove()
 logger.add(
@@ -17,15 +18,27 @@ logger.add(
 )
 
 
-async def reset_password(username: str, new_password: str):
+async def reset_password():
     """重置用户密码"""
     from packages.backend.auth.user import reset_user_password
 
-    if reset_user_password(username, new_password):
-        logger.info(f"用户 {username} 的密码已成功重置")
+    print("请输入新密码：")
+    password1 = getpass.getpass("密码: ")
+    password2 = getpass.getpass("确认密码: ")
+
+    if password1 != password2:
+        logger.error("两次输入的密码不一致，重置失败")
+        return 1
+
+    if not password1:
+        logger.error("密码不能为空，重置失败")
+        return 1
+
+    if reset_user_password("nekobot", password1):
+        logger.info("密码已成功重置")
         return 0
     else:
-        logger.error(f"重置用户 {username} 的密码失败")
+        logger.error("密码重置失败")
         return 1
 
 
@@ -35,21 +48,16 @@ async def main():
     parser = argparse.ArgumentParser(description="NekoBot 命令行工具")
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
 
-    # 启动服务器命令
-    start_parser = subparsers.add_parser("start", help="启动 NekoBot 服务器")
-
     # 重置密码命令
     reset_parser = subparsers.add_parser("reset-password", help="重置用户密码")
-    reset_parser.add_argument("username", help="要重置密码的用户名")
-    reset_parser.add_argument("new_password", help="新密码")
 
     args = parser.parse_args()
 
     if args.command == "reset-password":
         # 执行密码重置
-        return await reset_password(args.username, args.new_password)
+        return await reset_password()
     else:
-        # 启动服务器
+        # 默认启动服务器
         logger.info("启动 NekoBot...")
 
         # 导入 Quart 应用

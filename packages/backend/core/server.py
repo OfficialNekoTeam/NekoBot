@@ -88,16 +88,20 @@ async def start_server() -> None:
     await platform_manager.start_all()
     logger.info("所有平台适配器已启动")
 
-    # 4. 加载插件（在平台启动后加载，确保插件可以使用平台功能）
+    # 4. 设置平台服务器引用，供插件使用
+    plugin_manager.set_platform_server(platform_manager)
+    logger.info("已设置平台服务器引用")
+
+    # 5. 加载插件（在平台启动后加载，确保插件可以使用平台功能）
     await plugin_manager.load_plugins()
     logger.info(f"已加载 {len(plugin_manager.plugins)} 个插件")
 
-    # 5. 自动启用所有插件
+    # 6. 自动启用所有插件
     for plugin_name in plugin_manager.plugins:
         await plugin_manager.enable_plugin(plugin_name)
     logger.info("所有插件已启用")
 
-    # 6. 初始化 Pipeline 调度器
+    # 7. 初始化 Pipeline 调度器
     pipeline_scheduler = PipelineScheduler(
         [
             WhitelistCheckStage(),

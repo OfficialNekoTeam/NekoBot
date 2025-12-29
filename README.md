@@ -4,7 +4,7 @@
 
 **多平台智能聊天机器人框架**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/NekoBotDevs/NekoBot)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/NekoBotTeam/NekoBot)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-AGPL-3.0-orange.svg)](LICENSE)
 
@@ -20,10 +20,10 @@
 
 ### 核心功能
 
-- **多平台支持**: 集成 12+ 主流聊天平台（QQ、Telegram、Discord、Slack、企业微信等）
-- **多 LLM 支持**: 内置 OpenAI、Anthropic、Google Gemini 等 LLM 服务商
+- **多平台支持**: 支持 QQ、Telegram、Discord 等主流聊天平台
+- **多 LLM 支持**: 集成 OpenAI、Google Gemini 等 LLM 服务商
 - **插件系统**: 完善的插件生态，支持热加载、热重载
-- **Web 仪表盘**: 基于 Next.js 的现代化管理界面
+- **Web 仪表盘**: 基于 React + Vite 的现代化管理界面
 - **实时日志**: WebSocket 实时日志推送
 - **安全可靠**: JWT 认证、bcrypt 密码加密
 
@@ -31,8 +31,8 @@
 
 - **异步架构**: 基于 Quart (异步 Flask)，高性能处理
 - **模块化设计**: 清晰的架构，易于扩展和维护
-- **配置管理**: 统一的配置管理器（NekoConfigManager）
-- **数据持久化**: SQLite + SQLModel，轻量级数据存储
+- **消息流水线**: 可扩展的消息处理管道机制
+- **数据持久化**: SQLite 轻量级数据存储
 
 ---
 
@@ -47,26 +47,26 @@
 
 1. 克隆仓库
 ```bash
-git clone https://github.com/NekoBotDevs/NekoBot.git
+git clone https://github.com/NekoBotTeam/NekoBot.git
 cd NekoBot
 ```
 
 2. 安装依赖
 ```bash
 # 使用 uv (推荐)
-uv pip install -r requirements.txt
+uv pip install -e .
 
 # 或使用 pip
-pip install -r requirements.txt
+pip install -e .
 ```
 
-3. 初始化
+3. 启动
 ```bash
-# 使用 CLI 工具初始化
-uv run -m nekobot.cli.commands init
-
-# 或直接运行（会自动初始化）
+# 使用 uv
 uv run main.py
+
+# 或使用 python
+python main.py
 ```
 
 ### 启动
@@ -94,113 +94,63 @@ python main.py
 
 ```
 NekoBot/
-├── nekobot/                    # 核心框架代码
-│   ├── auth/                   # JWT 认证系统
-│   ├── config/                 # 配置管理
-│   ├── database/               # 数据库模型
-│   ├── llm/                    # LLM 服务商集成
-│   ├── plugin/                 # 插件系统
-│   ├── web/                    # Web 服务和 API
-│   ├── cli/                    # CLI 命令行工具
-│   ├── core/                   # 核心模块
-│   └── utils/                  # 工具函数
+├── dashboard/                  # React+Vite 前端仪表盘
+│   ├── src/                    # 源代码
+│   │   ├── components/         # UI 组件
+│   │   ├── context/            # 上下文管理
+│   │   ├── pages/              # 页面组件
+│   │   └── utils/              # 工具函数
+│   └── package.json            # 前端依赖
 │
-├── dashboard/                  # Next.js 前端仪表盘
-├── data/                       # 数据存储目录
+├── docs/                       # 文档目录
+│
+├── packages/                   # 核心后端代码
+│   └── backend/                # 后端框架
+│       ├── auth/               # JWT 认证系统
+│       ├── core/               # 核心模块
+│       │   └── pipeline/       # 消息处理流水线
+│       ├── llm/                # LLM 服务商集成
+│       ├── platform/           # 平台适配器
+│       │   └── sources/        # 各平台实现
+│       ├── plugins/            # 插件系统
+│       └── routes/             # API 路由
+│
+├── data/                       # 数据存储目录（Git 忽略）
 │   ├── plugins/                # 用户插件
-│   ├── dist/                   # 前端编译产物
 │   ├── config.json             # 配置文件
 │   └── nekobot.db             # 数据库
 │
-├── packages/                   # 官方插件
 ├── main.py                     # 主入口
 ├── pyproject.toml             # 项目配置
-└── requirements.txt           # 依赖列表
+├── docker-compose.yaml        # Docker 部署配置
+├── compose.yaml                # Compose 配置
+└── LICENSE                     # AGPL-3.0 许可证
 ```
 
 ---
 
 ## CLI 命令
 
-```bash
-# 查看版本
-nekobot-cli version
-
-# 检查更新
-nekobot-cli check
-
-# 重置密码
-nekobot-cli reset-passwd
-
-# 初始化项目
-nekobot-cli init
-
-# 查看帮助
-nekobot-cli --help
-```
+当前版本暂未提供完整的 CLI 工具，请通过 Web 仪表盘进行管理。
 
 ---
 
 ## API 文档
-
-完整的 API 文档请查看：[API-Doc.md](LLM/API-Doc.md)
 
 ### 主要 API 端点
 
 - **认证**: `/api/auth/*`
 - **插件管理**: `/api/plugins/*`
 - **LLM 管理**: `/api/llm/*`
+- **平台管理**: `/api/platforms/*`
 - **配置管理**: `/api/config/*`
-- **系统信息**: `/api/system/*`
 - **实时日志**: `ws://host:port/ws`
 
 ---
 
 ## 插件开发
 
-### 插件结构
-
-```
-my_plugin/
-├── main.py              # 插件主程序
-├── metadata.yaml        # 元数据
-├── requirements.txt     # 依赖（可选）
-└── README.md           # 说明文档（可选）
-```
-
-### 最小示例
-
-**metadata.yaml**:
-```yaml
-name: MyPlugin
-version: 1.0.0
-description: 我的第一个插件
-author: Your Name
-repository: https://github.com/yourusername/MyPlugin
-```
-
-**main.py**:
-```python
-from nekobot.plugin.base import PluginBase
-
-class MyPlugin(PluginBase):
-    def __init__(self):
-        super().__init__()
-        self.name = "MyPlugin"
-        self.version = "1.0.0"
-    
-    async def register(self) -> bool:
-        # 插件注册逻辑
-        print("MyPlugin 已注册")
-        return True
-    
-    async def unregister(self) -> bool:
-        # 插件卸载逻辑
-        print("MyPlugin 已卸载")
-        return True
-```
-
-详细文档: [插件开发指南](LLM/Project.md#插件系统)
+想要开发插件? 请参考项目[https://github.com/NekoBotTeam/NekoBot_Plugins_Example](https://github.com/NekoBotTeam/NekoBot_Plugins_Example)
 
 ---
 
@@ -208,51 +158,16 @@ class MyPlugin(PluginBase):
 
 ### 已集成平台
 
-- QQ (OneBot V11)
-- QQ 官方接口
-- Telegram
-- Discord
-- Slack
-- 钉钉 (DingTalk)
-- 飞书 (Lark)
-- 企业微信 (WeCom)
-- 微信 (WechatPadPro)
-- 微信公众号
-- Satori 协议
-- WebChat (网页聊天)
+- **QQ** (OneBot V11)
+- **Discord**
+- **Telegram**
 
 ---
 
 ## 支持的 LLM
 
-- **OpenAI** (GPT-3.5, GPT-4, GPT-4 Turbo 等)
-- **Anthropic** (Claude 系列)
+- **OpenAI** (GPT-3.5, GPT-4, GPT-4o 等)
 - **Google** (Gemini 系列)
-- **自定义服务商** (兼容 OpenAI API 格式)
-
----
-
-## 配置说明
-
-主配置文件位于 `./data/config.json`
-
-### 主要配置项
-
-```json
-{
-  "server": {
-    "host": "0.0.0.0",
-    "port": 6285,
-    "cors_origins": ["*"]
-  },
-  "bot": {
-    "command_prefix": "/"
-  },
-  "logging": {
-    "level": "INFO"
-  }
-}
-```
 
 ---
 
@@ -302,46 +217,50 @@ ruff check .
 
 ### 2. 忘记密码怎么办？
 
-使用 CLI 工具重置：
+可通过运行以下命令重置密码：
+
 ```bash
-nekobot-cli reset-passwd
+# 使用 uv
+uv run main.py reset-password
+
+# 或使用 python
+python main.py reset-password
 ```
+
+按照提示输入两次新密码，密码重置成功后即可使用新密码登录。
+
+> ⚠️ **安全警告**
+>
+> NekoBot 首次登录时会强制要求修改密码。如果用户未修改默认密码而导致的安全问题，开发团队不承担责任。
+>
+> 重置密码时输入密码时无任何回显提示，直接输入密码后回车即可。
 
 ### 3. 如何添加新的 LLM 服务商？
 
-通过 Web 仪表盘或 API 添加：
-```bash
-POST /api/llm/providers
-{
-  "name": "my-llm",
-  "provider_type": "openai",
-  "api_keys": ["sk-..."],
-  "model": "gpt-4"
-}
-```
+通过 Web 仪表盘添加。
 
 ### 4. 插件如何热重载？
 
-```bash
-POST /api/plugins/<plugin_name>/reload
-```
+通过 Web 仪表盘重新加载插件。
 
 ---
 
 ## 路线图
 
+- [x] QQ (OneBot V11) 支持
+- [x] Discord 支持
+- [x] Telegram 支持
 - [ ] 更多平台适配器
+- [ ] CLI 命令行工具
 - [ ] 插件市场
-- [ ] 对话历史管理
 - [ ] 知识库集成
-- [ ] Docker 部署支持
 - [ ] 多语言支持
 
 ---
 
 ## 许可证
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
+本项目采用 AGPL-3.0 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
 
 ---
 
@@ -354,8 +273,7 @@ POST /api/plugins/<plugin_name>/reload
 
 ## 联系方式
 
-- GitHub Issues: [提交问题](https://github.com/NekoBotDevs/NekoBot/issues)
-- 文档: [查看文档](LLM/Project.md)
+- GitHub Issues: [提交问题](https://github.com/NekoBotTeam/NekoBot/issues)
 
 ---
 
@@ -364,6 +282,4 @@ POST /api/plugins/<plugin_name>/reload
 **如果这个项目对你有帮助，请给个 Star ⭐**
 
 Made with ❤️ by NekoBotTeam
-
 </div>
-

@@ -1,8 +1,9 @@
 [project]
 name = "nekobot"
 version = "1.0.0"
-description = "A modular chatbot framework for NapCat"
+description = "A powerful chatbot framework supporting multiple platforms and LLM providers"
 readme = "README.md"
+license = "AGPL-3.0"
 requires-python = ">=3.10"
 dependencies = [
     "websockets>=12.0",

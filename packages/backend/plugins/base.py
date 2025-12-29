@@ -50,30 +50,35 @@ class BasePlugin(ABC):
         """设置平台服务器引用"""
         self.platform_server = platform_server
 
-    async def send_private_message(self, user_id: int, message: str) -> bool:
+    async def send_private_message(self, user_id: int, message: str, platform_id: str = "onebot") -> bool:
         """发送私聊消息"""
-        from ..core.server import send_message
-
-        # 创建一个模拟的事件对象来调用 send_message 函数
-        event = {"message_type": "private", "user_id": user_id, "platform_id": "onebot"}
-        await send_message(event, message)
-        return True
+        if not self.platform_server:
+            logger.warning("平台服务器未设置，无法发送消息")
+            return False
+        
+        result = await self.platform_server.send_message(
+            platform_id=platform_id,
+            message_type="private",
+            target_id=str(user_id),
+            message=message
+        )
+        return result.get("status") == "success"
 
     async def send_group_message(
-        self, group_id: int, user_id: int, message: str
+        self, group_id: int, user_id: int, message: str, platform_id: str = "onebot"
     ) -> bool:
         """发送群消息"""
-        from ..core.server import send_message
-
-        # 创建一个模拟的事件对象来调用 send_message 函数
-        event = {
-            "message_type": "group",
-            "group_id": group_id,
-            "user_id": user_id,
-            "platform_id": "onebot",
-        }
-        await send_message(event, message)
-        return True
+        if not self.platform_server:
+            logger.warning("平台服务器未设置，无法发送消息")
+            return False
+        
+        result = await self.platform_server.send_message(
+            platform_id=platform_id,
+            message_type="group",
+            target_id=str(group_id),
+            message=message
+        )
+        return result.get("status") == "success"
 
 
 # 装饰器实现
