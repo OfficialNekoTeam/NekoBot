@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+sitecustomize.py
 
 # ============================================
 # Python 构建和分发

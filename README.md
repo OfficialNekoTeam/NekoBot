@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-AGPL-3.0-orange.svg)](LICENSE)
 
-一个功能强大、易于扩展的聊天机器人框架，支持多个聊天平台和 LLM 服务商
+一个功能强大、易于扩展的聊天机器人框架，支持多个聊天平台和 LLM 服务商(暂时不推荐投入正常使用，但线路图已经准备就绪)
 
 [功能特性](#功能特性) • [快速开始](#快速开始) • [文档](#文档) • [贡献](#贡献)
 

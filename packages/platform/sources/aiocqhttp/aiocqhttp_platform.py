@@ -6,8 +6,8 @@ from typing import Dict, Any, Optional
 from aiohttp import web, WSMsgType
 from loguru import logger
 
-from ..base import BasePlatform
-from ..register import register_platform_adapter
+from ...base import BasePlatform
+from ...register import register_platform_adapter
 
 
 @register_platform_adapter(

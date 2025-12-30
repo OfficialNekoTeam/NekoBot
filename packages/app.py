@@ -208,6 +208,15 @@ async def before_request():
 
 
 # 导入平台适配器以触发注册
+from .platform.sources.aiocqhttp.aiocqhttp_platform import AiocqhttpPlatform
+from .platform.sources.discord.discord_platform import DiscordPlatform
+from .platform.sources.telegram.telegram_platform import TelegramPlatform
+
+# 导入 LLM 提供商以触发注册
+from .llm.sources.openai_provider import OpenAIProvider
+from .llm.sources.openai_compatible_provider import OpenAICompatibleProvider
+from .llm.sources.gemini_provider import GeminiProvider
+from .llm.sources.glm_provider import GLMProvider
 
 
 # WebSocket 路由

@@ -8,6 +8,11 @@ from loguru import logger
 
 from .stage import Stage, register_stage
 from .context import PipelineContext
+from packages.llm import (
+    ContextManager,
+    ContextConfig,
+    ContextCompressionStrategy,
+)
 
 
 @register_stage
@@ -92,7 +97,7 @@ class ProcessStage(Stage):
 
     async def _process_command(self, event: dict, ctx: PipelineContext) -> bool:
         """处理命令"""
-        from ..core.server import format_message
+        from ..server import format_message
 
         normalized_text = format_message(event, simple=False)
         platform_id = event.get("platform_id", "onebot")
@@ -164,12 +169,12 @@ class ProcessStage(Stage):
     async def _trigger_llm_response(self, event: dict, ctx: PipelineContext) -> None:
         """触发 LLM 回复"""
         try:
-            from ..llm import (
+            from packages.llm import (
                 ContextManager,
                 ContextConfig,
                 ContextCompressionStrategy,
             )
-            from ..core.config import load_config
+            from ..config import load_config
 
             message_text = self._format_message(event, simple=False)
             config = load_config()
@@ -186,7 +191,7 @@ class ProcessStage(Stage):
                 return
 
             provider_type = provider_config.get("type", "unknown")
-            from ..llm.register import llm_provider_cls_map
+            from ...llm.register import llm_provider_cls_map
 
             provider_cls = llm_provider_cls_map.get(provider_type)
             if not provider_cls:
@@ -231,9 +236,9 @@ class ProcessStage(Stage):
         platform_id = event.get("platform_id", "onebot")
         platform = ctx.platform_manager.get_platform(platform_id)
         command_prefix = platform.get_config("command_prefix", "/") if platform else "/"
-        from ..core.server import get_full_version
+        from ..server import get_full_version
 
-        help_text = f"NekoBot {get_full_version()}\n\n"
+        help_text = f"NekoBot {get_full_version()}\n"
         help_text += "[System]\n"
         help_text += f"  {command_prefix}help: 查看、插件帮助\n"
         help_text += f"  {command_prefix}ping: 检查机器人状态\n"
@@ -241,16 +246,15 @@ class ProcessStage(Stage):
         help_text += f"  {command_prefix}op: 管理员\n"
         help_text += f"  {command_prefix}wl: 白名单\n"
         help_text += f"  {command_prefix}dashboard_update: 更新管理面板\n"
-        help_text += f"  {command_prefix}alter_cmd: 设置指令权限\n\n"
-
-        help_text += "[Plugin]\n"
+        help_text += f"  {command_prefix}alter_cmd: 设置指令权限\n"
+        help_text += "\n[Plugin]\n"
         help_text += f"  {command_prefix}plugins list: 显示已加载的插件\n"
         help_text += f"  {command_prefix}plugins enable <插件名>: 启用插件\n"
         help_text += f"  {command_prefix}plugins disable <插件名>: 禁用插件\n"
         help_text += f"  {command_prefix}plugins reload <插件名>: 重载插件\n"
         help_text += f"  {command_prefix}plugins install <URL>: 从 URL 安装插件\n"
         help_text += f"  {command_prefix}plugins uninstall <插件名>: 卸载插件\n"
-        help_text += f"  {command_prefix}plugins help <插件名>: 查看插件帮助\n\n"
+        help_text += f"  {command_prefix}plugins help <插件名>: 查看插件帮助"
 
         await self._send_message(event, ctx, help_text)
 
@@ -372,7 +376,7 @@ class ProcessStage(Stage):
         command_handlers = []
         command_names = []
         for cmd_name, cmd_func in plugin.commands.items():
-            cmd_info = getattr(cmd_func, "_nekobot_command", {})
+            cmd_info = getattr(cmd_func, "_nekobot_command", None)
             command_handlers.append(cmd_func)
             command_names.append(cmd_name)
 
@@ -380,9 +384,9 @@ class ProcessStage(Stage):
             help_msg += "\n指令列表：\n"
             for i in range(len(command_handlers)):
                 line = f"  {command_names[i]}"
-                cmd_info = getattr(command_handlers[i], "_nekobot_command", {})
-                if cmd_info.get("description"):
-                    line += f": {cmd_info['description']}"
+                cmd_info = getattr(command_handlers[i], "_nekobot_command", None)
+                if cmd_info and cmd_info.description:
+                    line += f": {cmd_info.description}"
                 help_msg += line + "\n"
             help_msg += "\nTip: 指令的触发需要添加唤醒前缀，默认为 /。"
 
@@ -415,7 +419,7 @@ class ProcessStage(Stage):
             return
 
         admin_id = args[0]
-        from ..core.config import load_config
+        from ..config import load_config
 
         config = load_config()
         admins = config.get("admins_id", [])
@@ -436,7 +440,7 @@ class ProcessStage(Stage):
             return
 
         admin_id = args[0]
-        from ..core.config import load_config
+        from ..config import load_config
 
         config = load_config()
         admins = config.get("admins_id", [])
@@ -461,7 +465,7 @@ class ProcessStage(Stage):
             return
 
         sid = args[0]
-        from ..core.config import load_config
+        from ..config import load_config
 
         config = load_config()
         whitelist = config.get("id_whitelist", [])
@@ -482,7 +486,7 @@ class ProcessStage(Stage):
             return
 
         sid = args[0]
-        from ..core.config import load_config
+        from ..config import load_config
 
         config = load_config()
         whitelist = config.get("id_whitelist", [])

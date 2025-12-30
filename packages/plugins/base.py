@@ -5,6 +5,16 @@ from typing import Dict, Any, Callable, List, Optional
 from functools import wraps
 from loguru import logger
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+
+@dataclass
+class CommandInfo:
+    """命令信息数据类"""
+    name: str
+    description: str
+    aliases: List[str]
+    func: Callable
 
 
 class BasePlugin(ABC):
@@ -82,21 +92,28 @@ class BasePlugin(ABC):
 
 # 装饰器实现
 def register(command: str, description: str = "", aliases: List[str] = None):
-    """注册命令装饰器"""
+    """注册命令装饰器
+    
+    Args:
+        command: 命令名称
+        description: 命令描述
+        aliases: 命令别名列表
+    """
 
     def decorator(func):
         @wraps(func)
         async def wrapper(self, *args, **kwargs):
             return await func(self, *args, **kwargs)
 
-        # 添加插件元数据
-        if not hasattr(wrapper, "_nekobot_command"):
-            wrapper._nekobot_command = {
-                "name": command,
-                "description": description,
-                "aliases": aliases or [],
-                "func": func,
-            }
+        # 使用数据类存储命令信息
+        command_info = CommandInfo(
+            name=command,
+            description=description,
+            aliases=aliases or [],
+            func=func
+        )
+        wrapper._nekobot_command = command_info
+        
         return wrapper
 
     return decorator
@@ -208,8 +225,8 @@ class PluginDecorator:
         # 处理命令注册
         if hasattr(method, "_nekobot_command"):
             cmd_info = method._nekobot_command
-            self.plugin.commands[cmd_info["name"]] = method
-            logger.info(f"注册命令: {cmd_info['name']}")
+            self.plugin.commands[cmd_info.name] = method
+            logger.info(f"注册命令: {cmd_info.name}")
 
             # 注册到命令管理系统
             try:
@@ -217,14 +234,14 @@ class PluginDecorator:
 
                 register_command(
                     handler_full_name=f"{self.plugin.name}.{method.__name__}",
-                    handler_name=cmd_info["name"],
+                    handler_name=cmd_info.name,
                     plugin_name=self.plugin.name,
                     module_path=self.plugin.__class__.__module__,
-                    description=cmd_info.get("description", ""),
-                    aliases=cmd_info.get("aliases", []),
+                    description=cmd_info.description,
+                    aliases=cmd_info.aliases,
                     permission="everyone",
                 )
-                logger.info(f"已将命令 {cmd_info['name']} 注册到命令管理系统")
+                logger.info(f"已将命令 {cmd_info.name} 注册到命令管理系统")
             except ImportError:
                 logger.warning("命令管理系统未导入，跳过命令注册")
 

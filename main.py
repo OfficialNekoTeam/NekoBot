@@ -3,8 +3,13 @@
 启动基于 Quart 框架的 NekoBot 服务器
 """
 
-from loguru import logger
+import os
 import sys
+
+# 禁止生成 __pycache__ 目录
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
+from loguru import logger
 import asyncio
 import argparse
 import getpass

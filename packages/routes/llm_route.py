@@ -10,11 +10,12 @@ from typing import Dict, Any
 from loguru import logger
 
 from .route import Route, Response, RouteContext
+from ..llm.register import llm_provider_cls_map
+
 
 LLM_PROVIDERS_PATH = (
     Path(__file__).parent.parent.parent.parent / "data" / "llm_providers.json"
 )
-
 
 class LlmRoute(Route):
     """LLM/TTL服务提供商路由"""
@@ -25,6 +26,7 @@ class LlmRoute(Route):
         self.providers_path.parent.mkdir(parents=True, exist_ok=True)
         self.routes = [
             ("/api/llm/providers", "GET", self.get_providers),
+            ("/api/llm/providers/types", "GET", self.get_provider_types),
             ("/api/llm/providers/add", "POST", self.add_provider),
             ("/api/llm/providers/update", "POST", self.update_provider),
             ("/api/llm/providers/delete", "POST", self.delete_provider),
@@ -134,6 +136,26 @@ class LlmRoute(Route):
         except Exception as e:
             logger.error(f"删除服务提供商失败: {e}")
             return Response().error(f"删除服务提供商失败: {str(e)}").to_dict()
+
+    async def get_provider_types(self) -> Dict[str, Any]:
+        """获取所有已注册的 LLM 提供商类型"""
+        try:
+            # 获取所有已注册的提供商类型
+            provider_types = []
+            for provider_key, provider_meta in llm_provider_cls_map.items():
+                provider_types.append({
+                    "type": provider_key,
+                    "display_name": provider_meta.provider_display_name,
+                    "description": provider_meta.desc,
+                })
+            
+            # 按显示名称排序
+            provider_types.sort(key=lambda x: x["display_name"])
+            
+            return Response().ok(data={"provider_types": provider_types}).to_dict()
+        except Exception as e:
+            logger.error(f"获取 LLM 提供商类型失败: {e}")
+            return Response().error(f"获取 LLM 提供商类型失败: {str(e)}").to_dict()
 
     def _load_providers(self) -> Dict[str, Any]:
         """加载所有服务提供商配置"""

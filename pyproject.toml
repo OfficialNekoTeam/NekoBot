@@ -49,6 +49,10 @@ exclude = [
 ignore = ["F403", "F405", "E501", "E402", "ASYNC230"]
 select = ["F", "E", "W", "ASYNC", "C4", "Q"]
 
+[tool.uv]
+# 禁止生成 Python 字节码缓存
+compile-bytecode = false
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",

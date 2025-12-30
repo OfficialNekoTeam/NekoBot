@@ -8,9 +8,9 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-from ..base import BasePlatform
-from ..register import register_platform_adapter
-from ..base import PlatformStatus
+from ...base import BasePlatform
+from ...register import register_platform_adapter
+from ...base import PlatformStatus
 
 
 @register_platform_adapter(
