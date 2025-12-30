@@ -30,21 +30,21 @@ class CompressionConfig:
 
 class ContextManager:
     """上下文管理器 - 支持持久化存储"""
-    
+
     def __init__(self, db: BaseDatabase, config: CompressionConfig = None):
         """初始化上下文管理器
-        
+
         Args:
             db: 数据库实例
             config: 压缩配置
         """
         self.db = db
         self.config = config or CompressionConfig()
-        
+
         # 从数据库加载所有上下文
         self.contexts: Dict[str, List[Dict[str, Any]]] = {}
         self._load_contexts_from_db()
-    
+
     def _load_contexts_from_db(self) -> None:
         """从数据库加载所有上下文"""
         try:
@@ -54,7 +54,7 @@ class ContextManager:
                 session_id = row["session_id"]
                 try:
                     data = json.loads(row["data"]) if row["data"] else {}
-                except:
+                except Exception:
                     data = {}
                 self.contexts[context_id] = {
                     "id": context_id,
@@ -66,7 +66,7 @@ class ContextManager:
             logger.info(f"从数据库加载了 {len(self.contexts)} 个上下文")
         except Exception as e:
             logger.error(f"从数据库加载上下文失败: {e}")
-    
+
     def add_message(
         self,
         session_id: str,
@@ -75,7 +75,7 @@ class ContextManager:
         metadata: Dict[str, Any] = None
     ) -> None:
         """添加消息到上下文并持久化
-        
+
         Args:
             session_id: 会话 ID
             role: 角色
@@ -87,10 +87,11 @@ class ContextManager:
         if not context:
             # 如果上下文不存在，创建新上下文
             try:
-                rows = self.db.execute(
+                self.db.execute(
                     "INSERT INTO contexts (session_id, platform_id, user_id, data) VALUES (?, ?, ?, ?)",
                     (session_id, "", "", json.dumps({"messages": []}))
                 )
+                context_id = self.db.last_insert_rowid()
                 context_id = self.db.last_insert_rowid()
                 self.contexts[context_id] = {
                     "id": context_id,
@@ -103,7 +104,7 @@ class ContextManager:
             except Exception as e:
                 logger.error(f"创建上下文失败: {e}")
                 raise
-        
+
         # 添加消息到上下文
         message_dict = {
             "role": role,
@@ -112,49 +113,49 @@ class ContextManager:
             "metadata": {k: v for k, v in metadata.items() if k not in ["role", "content", "timestamp"]}
         }
         context["messages"].append(message_dict)
-        
+
         # 应用压缩策略
         self._apply_compression(context_id)
-        
+
         # 持久化保存到数据库
         self._save_context_to_db(context_id)
-    
+
     def get_context(
         self,
         session_id: str,
         limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """获取会话上下文
-        
+
         Args:
             session_id: 会话 ID
             limit: 消息数量限制
-        
+
         Returns:
             上下文列表
         """
         context = self.contexts.get(session_id)
         if not context:
             return []
-        
+
         messages = context.get("messages", [])
-        
+
         if limit is not None and len(messages) > limit:
             messages = messages[-limit:]
-        
+
         return messages
-    
+
     def _apply_compression(self, context_id: str) -> None:
         """应用压缩策略"""
         context = self.contexts.get(context_id)
         if not context:
             return
-        
+
         messages = context.get("messages", [])
         strategy = self.config.strategy
         max_messages = self.config.max_messages
         min_messages = self.config.min_messages
-        
+
         if strategy == CompressionStrategy.NONE:
             pass
         elif strategy == CompressionStrategy.FIFO:
@@ -166,20 +167,20 @@ class ContextManager:
         elif strategy == CompressionStrategy.SUMMARY:
             # 会话总结替代
             pass
-        
+
         # 确保至少保留 min_messages 条
         if len(messages) < min_messages:
             pass
-        
+
         # 更新内存中的上下文
         context["messages"] = messages
-    
+
     def _save_context_to_db(self, context_id: str) -> None:
         """保存上下文到数据库"""
         context = self.contexts.get(context_id)
         if not context:
             return
-        
+
         try:
             self.db.execute(
                 "UPDATE contexts SET data = ? WHERE id = ?",
@@ -189,7 +190,7 @@ class ContextManager:
         except Exception as e:
             logger.error(f"保存上下文到数据库失败: {e}")
             raise
-    
+
     def clear_context(self, session_id: str) -> None:
         """清除会话上下文"""
         if session_id in self.contexts:
@@ -205,21 +206,21 @@ class ContextManager:
                     logger.info(f"清除会话 {session_id} 的上下文")
             except Exception as e:
                 logger.error(f"清除上下文失败: {e}")
-            raise
-    
+                raise
+
     def get_context_stats(self, session_id: str) -> Dict[str, int]:
         """获取上下文统计信息
-        
+
         Args:
             session_id: 会话 ID
-        
+
         Returns:
             统计信息
         """
         context = self.contexts.get(session_id)
         if not context:
             return {"total_messages": 0, "user_messages": 0}
-        
+
         messages = context.get("messages", [])
         return {
             "total_messages": len(messages),

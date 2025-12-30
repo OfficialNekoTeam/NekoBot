@@ -5,7 +5,6 @@
 
 import json
 import uuid
-from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from loguru import logger
@@ -15,7 +14,7 @@ from .session_isolation import SessionIsolationManager
 
 class SessionMessage:
     """会话消息"""
-    
+
     def __init__(
         self,
         role: str,
@@ -31,7 +30,7 @@ class SessionMessage:
 
 class ConversationSession:
     """会话"""
-    
+
     def __init__(
         self,
         session_id: str,
@@ -51,7 +50,7 @@ class ConversationSession:
         self.messages = messages or []
         self.summary = summary
         self.metadata = metadata or {}
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -84,10 +83,10 @@ class CompressionConfig:
 
 class SessionManager:
     """会话管理器 - 支持会话隔离"""
-    
+
     def __init__(self, db: BaseDatabase, config: Dict[str, Any], isolation_manager: Optional[SessionIsolationManager] = None):
         """初始化会话管理器
-        
+
         Args:
             db: 数据库实例
             config: 配置字典
@@ -96,7 +95,7 @@ class SessionManager:
         self.db = db
         self.config = config or CompressionConfig()
         self.isolation_manager = isolation_manager
-        
+
         # 初始化数据库表
         self.db.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
@@ -109,7 +108,7 @@ class SessionManager:
                 summary TEXT,
                 metadata TEXT
             );
-            
+
             CREATE TABLE IF NOT EXISTS session_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -118,18 +117,18 @@ class SessionManager:
                 timestamp REAL NOT NULL,
                 metadata TEXT
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_session_session_id ON sessions(session_id);
             CREATE INDEX IF NOT EXISTS idx_session_user ON sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_session_platform ON sessions(platform_id);
         """)
-        
+
         # 初始化会话隔离管理器
         if self.isolation_manager:
             self.isolation_manager.initialize(self.db)
-        
+
         logger.info("会话管理器初始化完成")
-    
+
     def create_session(
         self,
         platform_id: str,
@@ -138,25 +137,25 @@ class SessionManager:
         metadata: Dict[str, Any] = None
     ) -> ConversationSession:
         """创建新会话
-        
+
         Args:
             platform_id: 平台 ID
             user_id: 用户 ID
             summary: 会话总结
             metadata: 元数据
-        
+
         Returns:
             ConversationSession 对象
         """
         session_id = f"{platform_id}:{user_id}:{uuid.uuid4().hex[:8]}"
         now = datetime.now().timestamp()
-        
+
         # 检查会话隔离
         is_isolated = False
         if self.isolation_manager:
             key = self.isolation_manager.get_isolation_key(platform_id, user_id, None)
             is_isolated = not self.isolation_manager.check_isolation(key, session_id)
-        
+
         try:
             self.db.execute(
                 "INSERT INTO sessions (session_id, platform_id, user_id, created_at, updated_at, summary, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -167,16 +166,16 @@ class SessionManager:
         except Exception as e:
             logger.error(f"创建会话失败: {e}")
             raise
-    
+
     def get_session(
         self,
         session_id: str
     ) -> Optional[ConversationSession]:
         """获取会话
-        
+
         Args:
             session_id: 会话 ID
-        
+
         Returns:
             ConversationSession 对象，不存在返回 None
         """
@@ -202,18 +201,18 @@ class SessionManager:
         except Exception as e:
             logger.error(f"获取会话失败: {e}")
             return None
-    
+
     def get_or_create_session(
         self,
         platform_id: str,
         user_id: str,
     ) -> ConversationSession:
         """获取或创建会话（如果不存在则创建）
-        
+
         Args:
             platform_id: 平台 ID
             user_id: 用户 ID
-        
+
         Returns:
             ConversationSession 对象
         """
@@ -221,7 +220,7 @@ class SessionManager:
         if not session:
             session = self.create_session(platform_id, user_id)
         return session
-    
+
     def add_message(
         self,
         session_id: str,
@@ -230,7 +229,7 @@ class SessionManager:
         metadata: Dict[str, Any] = None
     ) -> None:
         """添加消息到会话
-        
+
         Args:
             session_id: 会话 ID
             role: 角色（user/assistant/system）
@@ -238,8 +237,8 @@ class SessionManager:
             metadata: 元数据
         """
         # 获取或创建会话
-        session = self.get_or_create_session(session_id.split(":")[0], session_id.split(":")[1])
-        
+        self.get_or_create_session(session_id.split(":")[0], session_id.split(":")[1])
+
         try:
             self.db.execute(
                 "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?)",
@@ -249,18 +248,18 @@ class SessionManager:
         except Exception as e:
             logger.error(f"添加消息失败: {e}")
             raise
-    
+
     def get_session_messages(
         self,
         session_id: str,
         limit: int = 100
     ) -> List[SessionMessage]:
         """获取会话消息
-        
+
         Args:
             session_id: 会话 ID
             limit: 消息数量限制
-        
+
         Returns:
             消息列表
         """
@@ -281,18 +280,18 @@ class SessionManager:
         except Exception as e:
             logger.error(f"获取会话消息失败: {e}")
             return []
-    
+
     def update_session_summary(
         self,
         session_id: str,
         summary: str
     ) -> bool:
         """更新会话总结
-        
+
         Args:
             session_id: 会话 ID
             summary: 会话总结
-        
+
         Returns:
             是否成功
         """
@@ -307,18 +306,18 @@ class SessionManager:
         except Exception as e:
             logger.error(f"更新会话总结失败: {e}")
             return False
-    
+
     def get_user_sessions(
         self,
         user_id: str,
         platform_id: Optional[str] = None
     ) -> List[ConversationSession]:
         """获取用户的所有会话
-        
+
         Args:
             user_id: 用户 ID
             platform_id: 平台 ID（可选）
-        
+
         Returns:
             会话列表
         """
@@ -350,16 +349,16 @@ class SessionManager:
         except Exception as e:
             logger.error(f"获取用户会话失败: {e}")
             return []
-    
+
     def delete_session(
         self,
         session_id: str
     ) -> bool:
         """删除会话
-        
+
         Args:
             session_id: 会话 ID
-        
+
         Returns:
             是否成功
         """
@@ -373,7 +372,7 @@ class SessionManager:
                     pass
                 else:
                     logger.warning(f"会话 {session_id} 不是隔离的，继续删除")
-            
+
             # 删除会话消息
             self.db.execute("DELETE FROM session_messages WHERE session_id = ?", (session_id,))
             # 删除会话
@@ -383,7 +382,7 @@ class SessionManager:
         except Exception as e:
             logger.error(f"删除会话失败: {e}")
             return False
-    
+
     def _load_session_messages(self, session_db_id: int) -> List[SessionMessage]:
         """从数据库加载会话消息"""
         try:
@@ -400,5 +399,5 @@ class SessionManager:
                     metadata=json.loads(row["metadata"]) if row["metadata"] else None
                 ))
             return messages
-        except Exception as e:
+        except Exception:
             return []

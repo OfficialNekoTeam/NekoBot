@@ -78,19 +78,19 @@ class ProcessStage(Stage):
             logger.info(f"猫猫 | 接收 <- 私聊 [{user_disp}] {text_log}")
 
         message_type = event.get("message_type", "")
-        message = event.get("message", "")
-        
+        event.get("message", "")
+
         # 获取 LLM 回复模式配置
         from ..config import load_config
         config = load_config()
         llm_reply_mode = config.get("llm_reply_mode", "active")
-        
+
         # 检查是否被艾特
         is_at_me = self._check_if_at_me(event, ctx)
-        
+
         # 检查是否是命令
         is_command = self._check_if_command(event, ctx)
-        
+
         # 私聊消息处理
         if message_type == "private":
             await ctx.plugin_manager.handle_message(event)
@@ -98,10 +98,10 @@ class ProcessStage(Stage):
             if llm_reply_mode != "passive":
                 asyncio.create_task(self._trigger_llm_response(event, ctx))
             return
-        
+
         # 群聊消息根据模式决定是否触发 LLM
         should_trigger_llm = False
-        
+
         if llm_reply_mode == "active":
             # 主动模式：所有消息都触发
             should_trigger_llm = True
@@ -111,13 +111,16 @@ class ProcessStage(Stage):
         elif llm_reply_mode == "at":
             # 艾特模式：只有被艾特时触发
             should_trigger_llm = is_at_me
+            logger.debug(f"艾特模式: is_at_me={is_at_me}, should_trigger_llm={should_trigger_llm}")
         elif llm_reply_mode == "command":
             # 命令模式：只有使用命令前缀时触发
             should_trigger_llm = is_command
         
+        logger.debug(f"LLM 回复模式: {llm_reply_mode}, 触发: {should_trigger_llm}, 是命令: {is_command}")
+
         # 处理消息
         await ctx.plugin_manager.handle_message(event)
-        
+
         # 如果是命令，先尝试处理命令
         if is_command:
             command_handled = await self._process_command(event, ctx)
@@ -206,12 +209,13 @@ class ProcessStage(Stage):
                 ContextCompressionStrategy,
                 LLMResponse,
             )
+            from ...agent.base import ToolRegistry, ToolDefinition, ToolCategory
             from ..config import load_config
 
             message_text = self._format_message(event, simple=False)
             config = load_config()
             llm_providers = config.get("llm_providers", {})
-            
+
             # 记录 LLM 提供商状态（不暴露敏感信息）
             provider_names = [p.get("name", "未命名") for p in llm_providers.values()]
             enabled_count = sum(1 for p in llm_providers.values() if p.get("enabled", False))
@@ -224,7 +228,7 @@ class ProcessStage(Stage):
                     break
 
             if not provider_config:
-                logger.warning(f"未找到启用的 LLM 提供商")
+                logger.warning("未找到启用的 LLM 提供商")
                 return
 
             provider_type = provider_config.get("type", "unknown")
@@ -240,6 +244,130 @@ class ProcessStage(Stage):
             user_id = event.get("user_id", "unknown")
             group_id = event.get("group_id", "private")
             session_id = f"{group_id}_{user_id}"
+
+            # 获取用户信息用于构建系统提示词
+            sender = event.get("sender", {}) if isinstance(event.get("sender"), dict) else {}
+            nickname = sender.get("card") or sender.get("nickname") or str(user_id)
+            user_disp = f"{nickname}({user_id})"
+            
+            # 获取群组信息
+            group_name = event.get("group_name")
+            message_type = event.get("message_type", "")
+            bot_id = event.get("self_id", "unknown")
+            
+            # 初始化工具注册表并注册内置工具
+            tool_registry = ToolRegistry()
+            
+            # 工具：获取用户信息
+            def get_user_info() -> str:
+                """获取当前用户信息"""
+                return f"""用户信息详情:
+- QQ号: {user_id}
+- 昵称: {nickname}
+- 显示名称: {user_disp}
+- 消息类型: {'群聊' if message_type == 'group' else '私聊'}
+{f"- 所在群组: {group_name} ({group_id})" if message_type == 'group' else ""}"""
+            
+            tool_registry.register_tool(ToolDefinition(
+                name="get_user_info",
+                category=ToolCategory.SYSTEM,
+                description="获取当前对话用户的详细信息，包括QQ号、昵称、显示名称、消息类型等",
+                function=get_user_info,
+                enabled=True
+            ))
+            
+            # 工具：获取群组信息
+            def get_group_info() -> str:
+                """获取当前群组信息"""
+                if message_type != "group":
+                    return "当前是私聊对话，无法获取群组信息"
+                return f"""群组信息详情:
+- 群组ID: {group_id}
+- 群组名称: {group_name or '未知'}
+- 你的机器人ID: {bot_id}
+- 当前用户: {user_disp}"""
+            
+            tool_registry.register_tool(ToolDefinition(
+                name="get_group_info",
+                category=ToolCategory.SYSTEM,
+                description="获取当前群组的详细信息，包括群组ID、群组名称等（仅在群聊时可用）",
+                function=get_group_info,
+                enabled=True
+            ))
+            
+            # 工具：列出可用工具
+            def list_tools() -> str:
+                """列出所有可用的工具"""
+                tools = tool_registry.list_tools()
+                tool_list = "\n".join([
+                    f"【{tool.name}】\n  描述: {tool.description}\n  类别: {tool.category.value}\n  状态: {'已启用' if tool.enabled else '已禁用'}"
+                    for tool in tools
+                ])
+                return f"""当前可用工具列表（共 {len(tools)} 个）:\n\n{tool_list}\n\n提示: 你可以在回答中告诉用户这些工具的用途和功能。"""
+            
+            tool_registry.register_tool(ToolDefinition(
+                name="list_tools",
+                category=ToolCategory.SYSTEM,
+                description="列出所有可用的工具及其详细描述，包括工具名称、功能、类别和状态",
+                function=list_tools,
+                enabled=True
+            ))
+            
+            # 构建工具列表描述
+            tools_desc = """=== 可用工具列表 ===
+
+【get_user_info】
+- 功能: 获取当前对话用户的详细信息
+- 用途: 可以查询用户的QQ号、昵称、显示名称、消息类型等信息
+- 使用场景: 当需要了解用户身份或引用用户信息时使用
+
+【get_group_info】
+- 功能: 获取当前群组的详细信息
+- 用途: 可以查询群组ID、群组名称等信息（仅群聊时可用）
+- 使用场景: 当需要在群聊中提及群组信息时使用
+
+【list_tools】
+- 功能: 列出所有可用的工具及其详细描述
+- 用途: 可以查看当前环境中可用的所有工具
+- 使用场景: 当用户询问可用工具或需要了解环境功能时使用
+
+=== 工具说明 ===
+这些工具可以帮助你更好地理解当前对话环境和用户需求。你可以在回答中主动提及这些工具，或根据用户需求调用相关工具获取信息。"""
+            
+            # 构建用户信息系统提示词
+            user_info_prompt = f"""你是 NekoBot，一个智能聊天机器人框架中的 AI 助手。
+
+=== 当前对话环境 ===
+- 用户: {user_disp}
+- 消息类型: {'群聊' if message_type == 'group' else '私聊'}
+{f"- 群组: {group_name}({group_id})" if message_type == 'group' and group_name else ""}
+- 机器人ID: {bot_id}
+
+=== 可访问的用户信息 ===
+1. 用户QQ号: {user_id}
+2. 用户昵称: {nickname}
+3. 对话类型: {'群聊' if message_type == 'group' else '私聊'}
+{f"4. 当前群组: {group_name} ({group_id})" if message_type == 'group' and group_name else ""}
+
+{tools_desc}
+
+=== 你的角色和任务 ===
+1. 你是一个友好、专业的 AI 助手
+2. 你可以访问上述用户信息并在回答中引用
+3. 你可以使用提供的工具来获取更多信息
+4. 当用户询问可用工具时，请详细列出所有工具及其功能
+5. 在群聊中，注意区分不同用户的消息，避免混淆
+6. 回复时保持自然、友好的语气
+7. 如果用户询问框架功能或工具，请详细解释每个工具的用途和使用场景
+
+=== 重要提示 ===
+- 用户信息是实时可用的，你可以直接在回答中引用
+- 工具是用来增强你能力的辅助手段，根据需要选择使用
+- 当用户询问"你有什么工具"或类似问题时，请详细列出所有工具及其功能描述
+- 你可以告诉用户这些工具是如何帮助解决他们的问题的
+
+请根据用户的问题，结合以上信息和工具，给出专业、友好的回答。
+"""
 
             compression_strategy_name = provider_config.get("compression_strategy", "fifo").lower()
             # 确保策略名称有效
@@ -257,6 +385,7 @@ class ProcessStage(Stage):
                 prompt=message_text,
                 session_id=session_id,
                 contexts=await context_manager.get_context(session_id),
+                system_prompt=user_info_prompt,
             )
 
             response_text = response.completion_text or response.content
@@ -543,20 +672,30 @@ class ProcessStage(Stage):
         """检查消息中是否艾特了机器人"""
         message = event.get("message", "")
         self_id = event.get("self_id")
-        
+        message_type = event.get("message_type", "")
+
+        logger.debug(f"检查艾特: message_type={message_type}, self_id={self_id}, message={message}")
+
         if not message or not self_id:
             return False
-        
+
         if isinstance(message, list):
             for msg_seg in message:
-                if msg_seg.get("type") == "at" and msg_seg.get("data", {}).get("qq") == self_id:
-                    return True
+                seg_type = msg_seg.get("type", "")
+                seg_data = msg_seg.get("data", {})
+                logger.debug(f"消息段: type={seg_type}, data={seg_data}")
+                if seg_type == "at":
+                    # 统一转换为字符串进行比较，避免类型不匹配
+                    at_qq = str(seg_data.get("qq", ""))
+                    if at_qq == str(self_id):
+                        logger.debug(f"检测到艾特机器人: qq={at_qq}")
+                        return True
         return False
-    
+
     def _check_if_command(self, event: dict, ctx: PipelineContext) -> bool:
         """检查是否是命令消息"""
         message = event.get("message", "")
-        
+
         if isinstance(message, list):
             for msg_seg in message:
                 if msg_seg.get("type") == "text":
@@ -570,9 +709,9 @@ class ProcessStage(Stage):
                         return True
         elif isinstance(message, str) and message.startswith("/"):
             return True
-        
+
         return False
-    
+
     def _format_message(self, event: dict, simple: bool = True) -> str:
         """格式化消息内容"""
         import re
@@ -590,7 +729,7 @@ class ProcessStage(Stage):
                     if t == "text":
                         parts.append(data.get("text", ""))
                 return "".join(parts)
-            
+
             # 如果是字符串，过滤 CQ 码
             raw = event.get("raw_message")
             if isinstance(raw, str):

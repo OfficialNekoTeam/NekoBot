@@ -6,6 +6,7 @@
 from .scheduler import PipelineScheduler
 from .stage import Stage
 from .context import PipelineContext
+from .event_stopper import EventStopper
 from .whitelist_check_stage import WhitelistCheckStage
 from .content_safety_check_stage import ContentSafetyCheckStage
 from .rate_limit_stage import RateLimitStage
@@ -19,6 +20,7 @@ __all__ = [
     "PipelineScheduler",
     "Stage",
     "PipelineContext",
+    "EventStopper",
     "WhitelistCheckStage",
     "ContentSafetyCheckStage",
     "RateLimitStage",

@@ -10,7 +10,7 @@ from loguru import logger
 
 from .route import Route, Response, RouteContext
 from ..core.config import load_config
-from ..core.version import get_version_info, display_version
+from ..core.version import get_version_info
 
 CONFIG_PATH = Path(__file__).parent.parent.parent / "data" / "cmd_config.json"
 PLATFORMS_SOURCES_PATH = Path(__file__).parent.parent.parent / "data" / "platforms_sources.json"
@@ -54,14 +54,14 @@ class BotConfigRoute(Route):
 
             base_allowed_keys = ["command_prefix", "server", "jwt", "webui_enabled", "demo", "llm_reply_mode"]
             platforms = config.get("platforms")
-            
+
             if platforms is not None and isinstance(platforms, dict):
                 self._save_platforms_sources(platforms)
-            
+
             for key in config:
                 if key in base_allowed_keys:
                     current_config[key] = config[key]
-            
+
             self._save_config(current_config)
             return Response().ok(message="配置更新成功").to_dict()
         except Exception as e:
@@ -88,10 +88,10 @@ class BotConfigRoute(Route):
             build_time = data.get("build_time")
             git_commit = data.get("git_commit")
             git_branch = data.get("git_branch")
-            
+
             from ..core.version import write_version_file
             write_version_file(version, build_time, git_commit, git_branch)
-            
+
             return Response().ok(message="版本信息更新成功").to_dict()
         except Exception as e:
             logger.error(f"更新版本信息失败: {e}")

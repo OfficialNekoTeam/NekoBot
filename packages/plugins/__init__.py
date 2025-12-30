@@ -12,6 +12,17 @@ from .base import (
     on_private_message,
     on_group_message,
 )
+from .metadata import (
+    PluginMetadata,
+    MetadataLoader,
+    MetadataRegistry,
+)
+from .filters import (
+    HandlerFilter,
+    PermissionFilter,
+    PermissionType,
+    PermissionError,
+)
 
 __all__ = [
     "BasePlugin",
@@ -24,4 +35,11 @@ __all__ = [
     "on_message",
     "on_private_message",
     "on_group_message",
+    "PluginMetadata",
+    "MetadataLoader",
+    "MetadataRegistry",
+    "HandlerFilter",
+    "PermissionFilter",
+    "PermissionType",
+    "PermissionError",
 ]
