@@ -18,6 +18,9 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "tomli>=0.2.1",
     "psutil>=6.1.0",
+    "httpx>=0.28.1",
+    "openai>=2.14.0",
+    "google-genai>=1.0.0",
 ]
 
 [build-system]

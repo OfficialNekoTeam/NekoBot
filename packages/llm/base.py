@@ -4,9 +4,9 @@
 """
 
 import abc
-from typing import Any
 
 from .register import LLMProviderMetaData, llm_provider_cls_map
+from .entities import LLMResponse
 
 
 class BaseLLMProvider(abc.ABC):
@@ -73,7 +73,7 @@ class BaseLLMProvider(abc.ABC):
         system_prompt: str | None = None,
         model: str | None = None,
         **kwargs,
-    ) -> dict[str, Any]:
+    ) -> LLMResponse:
         """获取 LLM 的文本对话结果
 
         Args:
@@ -86,7 +86,7 @@ class BaseLLMProvider(abc.ABC):
             **kwargs: 其他参数
 
         Returns:
-            对话结果字典
+            LLMResponse 对象
         """
         raise NotImplementedError
 

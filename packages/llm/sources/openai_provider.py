@@ -1,15 +1,16 @@
 """OpenAI LLM 提供商
 
-参考 AstrBot 的 OpenAI 适配器实现
+支持 GPT-4、GPT-3.5 等模型
 """
 
-import asyncio
 from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
-from ..base import BaseLLMProvider, LLMProviderType
-from ..register import register_llm_provider
+from ..base import BaseLLMProvider
+from ..register import register_llm_provider, LLMProviderType
+from ..entities import LLMResponse, TokenUsage
+from openai import AsyncOpenAI
 
 
 @register_llm_provider(
@@ -37,190 +38,278 @@ class OpenAIProvider(BaseLLMProvider):
         self.base_url = provider_config.get("base_url", "https://api.openai.com/v1")
         self.max_tokens = provider_config.get("max_tokens", 4096)
         self.temperature = provider_config.get("temperature", 0.7)
-        self._client: Optional[Any] = None
+        self.timeout = provider_config.get("timeout", 120)
+        self.custom_headers = provider_config.get("custom_headers", {})
+        self._client: Optional[AsyncOpenAI] = None
+        self._current_key_index = 0
+
+    def _get_client(self) -> AsyncOpenAI:
+        """获取或创建 OpenAI 客户端"""
+        if self._client is None or self._client.is_closed:
+            self._client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                default_headers=self.custom_headers,
+                timeout=self.timeout,
+            )
+        return self._client
+
+    def get_current_key(self) -> str:
+        """获取当前 API Key"""
+        keys = self.get_keys()
+        if keys and self._current_key_index < len(keys):
+            return keys[self._current_key_index]
+        return ""
+
+    def set_key(self, key: str) -> None:
+        """设置 API Key"""
+        self.provider_config["api_key"] = [key]
+        self.api_key = key
+        # 重新创建客户端以更新 API Key
+        self._client = None
 
     async def initialize(self) -> None:
         """初始化提供商"""
         if not self.api_key:
             raise ValueError("OpenAI API Key 未配置")
 
-        # 这里应该初始化 OpenAI 客户端
-        # 暂时使用模拟实现
+        self._client = self._get_client()
         logger.info("[OpenAI] OpenAI 提供商已初始化")
+
+    async def get_models(self):
+        """获取支持的模型列表"""
+        try:
+            models_str = []
+            models = await self._client.models.list()
+            models = sorted(models.data, key=lambda x: x.id)
+            for model in models:
+                models_str.append(model.id)
+            return models_str
+        except Exception as e:
+            raise Exception(f"获取模型列表失败：{e}")
 
     async def text_chat(
         self,
-        prompt: Optional[str] = None,
-        session_id: Optional[str] = None,
-        image_urls: Optional[list[str]] = None,
-        func_tool: Optional[Any] = None,
-        contexts: Optional[list[dict]] = None,
-        system_prompt: Optional[str] = None,
-        tool_calls_result: Optional[Any] = None,
-        model: Optional[str] = None,
-        extra_user_content_parts: Optional[list[Any]] = None,
+        prompt: str | None = None,
+        session_id: str | None = None,
+        image_urls: list[str] | None = None,
+        func_tool: Any = None,
+        contexts: list[dict] | None = None,
+        system_prompt: str | None = None,
+        tool_calls_result: Any = None,
+        model: str | None = None,
+        extra_user_content_parts: Any = None,
         **kwargs,
-    ) -> dict[str, Any]:
+    ) -> LLMResponse:
         """文本对话
 
         Args:
             prompt: 提示词
-            session_id: 会话 ID
+            session_id: 会话 ID (已废弃)
             image_urls: 图片 URL 列表
             func_tool: 工具集
             contexts: 上下文
             system_prompt: 系统提示词
             tool_calls_result: 工具调用结果
             model: 模型名称
-            extra_user_content_parts: 额外用户内容部分
+            extra_user_content_parts: 额外的用户内容部分
+            **kwargs: 其他参数
 
         Returns:
-            LLM 响应
+            LLMResponse 对象
         """
-        # 构建消息列表
-        messages = []
+        try:
+            # 构建消息列表
+            messages = []
 
-        # 添加系统提示词
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+            # 添加系统提示词
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
 
-        # 添加上下文
-        if contexts:
-            messages.extend(contexts)
+            # 添加上下文
+            if contexts:
+                messages.extend(contexts)
 
-        # 添加用户消息
-        if prompt:
-            user_message = {"role": "user", "content": prompt}
-            if image_urls:
-                user_message["content"] = [
-                    {"type": "text", "text": prompt},
-                    *[
-                        {"type": "image_url", "image_url": {"url": url}}
-                        for url in image_urls
-                    ],
-                ]
-            messages.append(user_message)
+            # 添加用户消息
+            if prompt:
+                user_message = {"role": "user", "content": prompt}
+                if image_urls:
+                    user_message["content"] = [
+                        {"type": "text", "text": prompt},
+                        *[
+                            {"type": "image_url", "image_url": {"url": url}}
+                            for url in image_urls
+                        ],
+                    ]
+                messages.append(user_message)
+            elif image_urls:
+                messages.append({"role": "user", "content": [{"type": "text", "text": "[图片]"}]})
 
-        # 这里应该调用 OpenAI API
-        # 暂时返回模拟响应
-        logger.info(
-            f"[OpenAI] 使用模型 {model or self.model_name} 处理请求，消息数: {len(messages)}"
-        )
+            completion = await self._client.chat.completions.create(
+                model=model or self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
 
-        # 模拟延迟
-        await asyncio.sleep(0.5)
+            # 解析响应
+            if not completion.choices:
+                raise Exception("API 返回的 completion 为空。")
 
-        return {
-            "content": f"这是来自 OpenAI {model or self.model_name} 的模拟响应。",
-            "model": model or self.model_name,
-            "usage": {
-                "prompt_tokens": 100,
-                "completion_tokens": 50,
-                "total_tokens": 150,
-            },
-        }
+            choice = completion.choices[0]
+
+            # 解析文本响应
+            if choice.message.content:
+                completion_text = str(choice.message.content).strip()
+                # 移除思考标签（如果有的话）
+                completion_text = completion_text.replace("<thinking>", "").replace("</thinking>", "")
+            else:
+                completion_text = ""
+
+            # 解析使用情况
+            usage = None
+            if completion.usage:
+                usage = TokenUsage(
+                    input_other=completion.usage.prompt_tokens,
+                    output=completion.usage.completion_tokens,
+                )
+
+            return LLMResponse(
+                role="assistant",
+                completion_text=completion_text,
+                raw_completion=completion,
+                usage=usage,
+            )
+
+        except Exception as e:
+            logger.error(f"[OpenAI] 文本聊天失败: {e}")
+            return LLMResponse(
+                role="err",
+                completion_text="",
+            )
 
     async def text_chat_stream(
         self,
-        prompt: Optional[str] = None,
-        session_id: Optional[str] = None,
-        image_urls: Optional[list[str]] = None,
-        func_tool: Optional[Any] = None,
-        contexts: Optional[list[dict]] = None,
-        system_prompt: Optional[str] = None,
-        tool_calls_result: Optional[Any] = None,
-        model: Optional[str] = None,
+        prompt: str | None = None,
+        session_id: str | None = None,
+        image_urls: list[str] | None = None,
+        func_tool: Any = None,
+        contexts: list[dict] | None = None,
+        system_prompt: str | None = None,
+        tool_calls_result: Any = None,
+        model: str | None = None,
         **kwargs,
-    ) -> AsyncGenerator[dict[str, Any], None]:
+    ) -> AsyncGenerator[LLMResponse, None]:
         """流式文本对话
 
         Args:
             prompt: 提示词
-            session_id: 会话 ID
+            session_id: 会话 ID (已废弃)
             image_urls: 图片 URL 列表
             func_tool: 工具集
             contexts: 上下文
             system_prompt: 系统提示词
             tool_calls_result: 工具调用结果
             model: 模型名称
+            extra_user_content_parts: 额外的用户内容部分
+            **kwargs: 其他参数
 
         Yields:
-            LLM 响应块
+            LLMResponse 对象
         """
-        # 构建消息列表
-        messages = []
+        try:
+            # 构建消息列表
+            messages = []
 
-        # 添加系统提示词
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+            # 添加系统提示词
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
 
-        # 添加上下文
-        if contexts:
-            messages.extend(contexts)
+            # 添加上下文
+            if contexts:
+                messages.extend(contexts)
 
-        # 添加用户消息
-        if prompt:
-            user_message = {"role": "user", "content": prompt}
-            if image_urls:
-                user_message["content"] = [
-                    {"type": "text", "text": prompt},
-                    *[
-                        {"type": "image_url", "image_url": {"url": url}}
-                        for url in image_urls
-                    ],
-                ]
-            messages.append(user_message)
+            # 添加用户消息
+            if prompt:
+                user_message = {"role": "user", "content": prompt}
+                if image_urls:
+                    user_message["content"] = [
+                        {"type": "text", "text": prompt},
+                        *[
+                            {"type": "image_url", "image_url": {"url": url}}
+                            for url in image_urls
+                        ],
+                    ]
+                messages.append(user_message)
+            elif image_urls:
+                messages.append({"role": "user", "content": [{"type": "text", "text": "[图片]"}]})
 
-        # 这里应该调用 OpenAI API 流式接口
-        # 暂时返回模拟流式响应
-        logger.info(f"[OpenAI] 使用模型 {model or self.model_name} 处理流式请求")
+            stream = await self._client.chat.completions.create(
+                model=model or self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                stream=True,
+            )
 
-        response_text = f"这是来自 OpenAI {model or self.model_name} 的模拟流式响应。"
+            llm_response = LLMResponse("assistant", is_chunk=True)
 
-        # 模拟流式输出
-        for i in range(0, len(response_text), 10):
-            chunk = response_text[i : i + 10]
-            yield {
-                "content": chunk,
-                "delta": chunk,
-                "finish_reason": None,
-            }
-            await asyncio.sleep(0.1)
+            try:
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
 
-        # 发送结束标记
-        yield {
-            "content": "",
-            "delta": "",
-            "finish_reason": "stop",
-        }
+                    delta = chunk.choices[0].delta
 
-    async def get_models(self) -> list[str]:
-        """获取支持的模型列表
+                    # 处理内容
+                    completion_text = ""
+                    if delta.content:
+                        completion_text = delta.content
 
-        Returns:
-            模型名称列表
-        """
-        # 这里应该调用 OpenAI API 获取模型列表
-        return [
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4-turbo",
-            "gpt-3.5-turbo",
-        ]
+                    # 处理使用情况
+                    if chunk.usage:
+                        llm_response.usage = TokenUsage(
+                            input_other=chunk.usage.prompt_tokens,
+                            output=chunk.usage.completion_tokens,
+                        )
 
-    async def test(self) -> None:
+                    if completion_text:
+                        llm_response.completion_text = completion_text
+                        yield llm_response
+
+                # 发送结束标记
+                llm_response = LLMResponse(
+                    role="assistant",
+                    completion_text="",
+                    is_chunk=True,
+                )
+                yield llm_response
+            except Exception as e:
+                logger.error(f"[OpenAI] 流式文本聊天失败: {e}")
+                yield LLMResponse(
+                    role="err",
+                    completion_text="",
+                )
+        except Exception as e:
+            logger.error(f"[OpenAI] 流式文本聊天失败: {e}")
+            yield LLMResponse(
+                role="err",
+                completion_text="",
+            )
+
+    async def test(self, timeout: float = 45.0):
         """测试提供商连接"""
-        if not self.api_key:
-            raise ValueError("OpenAI API Key 未配置")
-
-        # 这里应该调用 OpenAI API 进行测试
-        logger.info("[OpenAI] 测试连接...")
-        await asyncio.sleep(0.5)
-        logger.info("[OpenAI] 连接测试成功")
+        try:
+            import asyncio
+            await asyncio.wait_for(
+                self.text_chat(prompt="REPLY `PONG` ONLY"),
+                timeout=timeout,
+            )
+        except Exception as e:
+            raise Exception(f"测试连接失败: {e}")
 
     async def close(self) -> None:
         """关闭提供商"""
-        if self._client:
-            # 关闭 OpenAI 客户端
-            pass
-        logger.info("[OpenAI] 提供商已关闭")
+        if self._client and not self._client.is_closed:
+            await self._client.close()
+            logger.info("[OpenAI] 提供商已关闭")

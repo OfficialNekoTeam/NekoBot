@@ -8,11 +8,6 @@ from loguru import logger
 
 from .stage import Stage, register_stage
 from .context import PipelineContext
-from packages.llm import (
-    ContextManager,
-    ContextConfig,
-    ContextCompressionStrategy,
-)
 
 
 @register_stage
@@ -55,7 +50,19 @@ class ProcessStage(Stage):
 
         def _trim_text(t: str, n: int = 120) -> str:
             s = " ".join(t.splitlines())
-            return s if len(s) <= n else s[: n - 3] + "..."
+            try:
+                return s if len(s) <= n else s[: n - 3] + "..."
+            except UnicodeEncodeError:
+                # 如果遇到无法编码的字符，先使用 replace 过滤掉
+                safe_chars = []
+                for c in s:
+                    try:
+                        c.encode("gbk")
+                        safe_chars.append(c)
+                    except UnicodeEncodeError:
+                        pass
+                s_safe = "".join(safe_chars)
+                return s_safe if len(s_safe) <= n else s_safe[: n - 3] + "..."
         text_log = _trim_text(text_content)
         sender = (
             event.get("sender", {}) if isinstance(event.get("sender"), dict) else {}
@@ -173,6 +180,7 @@ class ProcessStage(Stage):
                 ContextManager,
                 ContextConfig,
                 ContextCompressionStrategy,
+                LLMResponse,
             )
             from ..config import load_config
 
@@ -193,40 +201,44 @@ class ProcessStage(Stage):
             provider_type = provider_config.get("type", "unknown")
             from ...llm.register import llm_provider_cls_map
 
-            provider_cls = llm_provider_cls_map.get(provider_type)
-            if not provider_cls:
+            provider_meta = llm_provider_cls_map.get(provider_type)
+            if not provider_meta:
                 logger.warning(f"未找到 LLM 提供商类型: {provider_type}")
                 return
 
-            provider = provider_cls(provider_config, {})
+            provider = provider_meta.cls_type(provider_config, {})
 
             user_id = event.get("user_id", "unknown")
             group_id = event.get("group_id", "private")
             session_id = f"{group_id}_{user_id}"
 
+            compression_strategy_name = provider_config.get("compression_strategy", "fifo").lower()
+            # 确保策略名称有效
+            valid_strategies = ["none", "fifo", "lru", "summary", "chat_summary"]
+            if compression_strategy_name not in valid_strategies:
+                compression_strategy_name = "fifo"
+
             context_config = ContextConfig(
                 max_messages=provider_config.get("max_messages", 20),
-                compression_strategy=ContextCompressionStrategy(
-                    provider_config.get("compression_strategy", "FIFO")
-                ),
+                compression_strategy=ContextCompressionStrategy(compression_strategy_name),
             )
             context_manager = ContextManager(context_config)
 
-            response = await provider.text_chat(
+            response: LLMResponse = await provider.text_chat(
                 prompt=message_text,
                 session_id=session_id,
-                contexts=context_manager.get_context(session_id),
+                contexts=await context_manager.get_context(session_id),
             )
 
-            response_text = response.get("content", "")
+            response_text = response.completion_text or response.content
             if not response_text:
                 logger.warning("LLM 返回空响应")
                 return
 
             await self._send_message(event, ctx, response_text)
 
-            context_manager.add_message(session_id, "user", message_text)
-            context_manager.add_message(session_id, "assistant", response_text)
+            await context_manager.add_message(session_id, "user", message_text)
+            await context_manager.add_message(session_id, "assistant", response_text)
 
         except Exception as e:
             logger.error(f"触发 LLM 回复失败: {e}")

@@ -8,6 +8,7 @@ from .register import (
     llm_provider_registry,
     llm_provider_cls_map,
     LLMProviderMetaData,
+    LLMProviderType,
 )
 from .context_manager import (
     ContextManager,
@@ -15,14 +16,21 @@ from .context_manager import (
     ContextCompressionStrategy,
     MessageRecord,
 )
+from .entities import (
+    TokenUsage,
+    LLMResponse,
+)
 
 __all__ = [
     "register_llm_provider",
     "llm_provider_registry",
     "llm_provider_cls_map",
     "LLMProviderMetaData",
+    "LLMProviderType",
     "ContextManager",
     "ContextConfig",
     "ContextCompressionStrategy",
     "MessageRecord",
+    "TokenUsage",
+    "LLMResponse",
 ]

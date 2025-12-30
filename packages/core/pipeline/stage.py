@@ -52,15 +52,15 @@ def register_stage(stage_cls: type) -> type:
         Stage 类
     """
     stage_name = stage_cls.__name__
-    
+
     if stage_name in _stage_registry:
         logger.warning(
             f"Stage {stage_name} 已存在，将被覆盖。"
         )
-    
+
     _stage_registry[stage_name] = stage_cls
     logger.debug(f"已注册 Stage: {stage_name}")
-    
+
     return stage_cls
 
 

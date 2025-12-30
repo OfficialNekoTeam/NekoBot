@@ -93,7 +93,7 @@ class BasePlugin(ABC):
 # 装饰器实现
 def register(command: str, description: str = "", aliases: List[str] = None):
     """注册命令装饰器
-    
+
     Args:
         command: 命令名称
         description: 命令描述
@@ -113,7 +113,7 @@ def register(command: str, description: str = "", aliases: List[str] = None):
             func=func
         )
         wrapper._nekobot_command = command_info
-        
+
         return wrapper
 
     return decorator

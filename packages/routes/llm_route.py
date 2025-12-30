@@ -148,10 +148,10 @@ class LlmRoute(Route):
                     "display_name": provider_meta.provider_display_name,
                     "description": provider_meta.desc,
                 })
-            
+
             # 按显示名称排序
             provider_types.sort(key=lambda x: x["display_name"])
-            
+
             return Response().ok(data={"provider_types": provider_types}).to_dict()
         except Exception as e:
             logger.error(f"获取 LLM 提供商类型失败: {e}")

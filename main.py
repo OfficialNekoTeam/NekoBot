@@ -7,7 +7,7 @@ import os
 import sys
 
 # 禁止生成 __pycache__ 目录
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 from loguru import logger
 import asyncio
