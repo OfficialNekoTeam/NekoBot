@@ -3,6 +3,7 @@
 处理消息（Agent/LLM 请求）
 """
 
+import asyncio
 from typing import AsyncGenerator, Optional
 from loguru import logger
 
@@ -76,31 +77,54 @@ class ProcessStage(Stage):
         else:
             logger.info(f"猫猫 | 接收 <- 私聊 [{user_disp}] {text_log}")
 
+        message_type = event.get("message_type", "")
         message = event.get("message", "")
-        is_command = False
-
-        if isinstance(message, list):
-            for msg_seg in message:
-                if msg_seg.get("type") == "text":
-                    text = msg_seg.get("data", {}).get("text", "")
-                    platform_id = event.get("platform_id", "onebot")
-                    platform = ctx.platform_manager.get_platform(platform_id)
-                    command_prefix = (
-                        platform.get_config("command_prefix", "/") if platform else "/"
-                    )
-                    if text.startswith(command_prefix):
-                        is_command = True
-                        break
-        elif isinstance(message, str) and message.startswith("/"):
-            is_command = True
-
-        if is_command:
+        
+        # 获取 LLM 回复模式配置
+        from ..config import load_config
+        config = load_config()
+        llm_reply_mode = config.get("llm_reply_mode", "active")
+        
+        # 检查是否被艾特
+        is_at_me = self._check_if_at_me(event, ctx)
+        
+        # 检查是否是命令
+        is_command = self._check_if_command(event, ctx)
+        
+        # 私聊消息处理
+        if message_type == "private":
             await ctx.plugin_manager.handle_message(event)
+            # passive 模式下私聊也不触发 LLM
+            if llm_reply_mode != "passive":
+                asyncio.create_task(self._trigger_llm_response(event, ctx))
+            return
+        
+        # 群聊消息根据模式决定是否触发 LLM
+        should_trigger_llm = False
+        
+        if llm_reply_mode == "active":
+            # 主动模式：所有消息都触发
+            should_trigger_llm = True
+        elif llm_reply_mode == "passive":
+            # 被动模式：不主动回复，只响应命令
+            should_trigger_llm = False
+        elif llm_reply_mode == "at":
+            # 艾特模式：只有被艾特时触发
+            should_trigger_llm = is_at_me
+        elif llm_reply_mode == "command":
+            # 命令模式：只有使用命令前缀时触发
+            should_trigger_llm = is_command
+        
+        # 处理消息
+        await ctx.plugin_manager.handle_message(event)
+        
+        # 如果是命令，先尝试处理命令
+        if is_command:
             command_handled = await self._process_command(event, ctx)
-            if not command_handled:
-                await self._trigger_llm_response(event, ctx)
-        else:
-            await self._trigger_llm_response(event, ctx)
+            if not command_handled and should_trigger_llm:
+                asyncio.create_task(self._trigger_llm_response(event, ctx))
+        elif should_trigger_llm:
+            asyncio.create_task(self._trigger_llm_response(event, ctx))
 
     async def _process_command(self, event: dict, ctx: PipelineContext) -> bool:
         """处理命令"""
@@ -187,6 +211,11 @@ class ProcessStage(Stage):
             message_text = self._format_message(event, simple=False)
             config = load_config()
             llm_providers = config.get("llm_providers", {})
+            
+            # 记录 LLM 提供商状态（不暴露敏感信息）
+            provider_names = [p.get("name", "未命名") for p in llm_providers.values()]
+            enabled_count = sum(1 for p in llm_providers.values() if p.get("enabled", False))
+            logger.debug(f"LLM 提供商: 共 {len(llm_providers)} 个，已启用 {enabled_count} 个: {', '.join(provider_names)}")
 
             provider_config = None
             for provider in llm_providers.values():
@@ -195,7 +224,7 @@ class ProcessStage(Stage):
                     break
 
             if not provider_config:
-                logger.warning("未找到启用的 LLM 提供商")
+                logger.warning(f"未找到启用的 LLM 提供商")
                 return
 
             provider_type = provider_config.get("type", "unknown")
@@ -510,14 +539,63 @@ class ProcessStage(Stage):
         else:
             await self._send_message(event, ctx, f"会话 {sid} 不在白名单内。")
 
+    def _check_if_at_me(self, event: dict, ctx: PipelineContext) -> bool:
+        """检查消息中是否艾特了机器人"""
+        message = event.get("message", "")
+        self_id = event.get("self_id")
+        
+        if not message or not self_id:
+            return False
+        
+        if isinstance(message, list):
+            for msg_seg in message:
+                if msg_seg.get("type") == "at" and msg_seg.get("data", {}).get("qq") == self_id:
+                    return True
+        return False
+    
+    def _check_if_command(self, event: dict, ctx: PipelineContext) -> bool:
+        """检查是否是命令消息"""
+        message = event.get("message", "")
+        
+        if isinstance(message, list):
+            for msg_seg in message:
+                if msg_seg.get("type") == "text":
+                    text = msg_seg.get("data", {}).get("text", "")
+                    platform_id = event.get("platform_id", "onebot")
+                    platform = ctx.platform_manager.get_platform(platform_id)
+                    command_prefix = (
+                        platform.get_config("command_prefix", "/") if platform else "/"
+                    )
+                    if text.startswith(command_prefix):
+                        return True
+        elif isinstance(message, str) and message.startswith("/"):
+            return True
+        
+        return False
+    
     def _format_message(self, event: dict, simple: bool = True) -> str:
         """格式化消息内容"""
         import re
 
         if not simple:
+            # 始终使用解析后的消息而不是 raw_message，避免 CQ 码传入 LLM
+            msg = event.get("message")
+            if isinstance(msg, list):
+                parts = []
+                for seg in msg:
+                    if not isinstance(seg, dict):
+                        continue
+                    t = seg.get("type")
+                    data = seg.get("data", {}) if isinstance(seg.get("data"), dict) else {}
+                    if t == "text":
+                        parts.append(data.get("text", ""))
+                return "".join(parts)
+            
+            # 如果是字符串，过滤 CQ 码
             raw = event.get("raw_message")
-            if isinstance(raw, str) and raw:
-                return raw
+            if isinstance(raw, str):
+                raw = re.sub(r"\[CQ:[^\]]+\]", "", raw)
+                return raw.strip()
 
         msg = event.get("message")
 

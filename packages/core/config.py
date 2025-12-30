@@ -65,6 +65,8 @@ def load_config() -> Dict[str, Any]:
             "github_proxy": None,
             "webui_version": None,
             "cors": load_cors_config(),
+            # LLM 回复模式: "active" (主动), "passive" (被动), "at" (艾特), "command" (命令)
+            "llm_reply_mode": "active",
         }
     else:
         try:

@@ -208,23 +208,30 @@ async def before_request():
 
 
 # 导入平台适配器以触发注册
+from .platform.sources.aiocqhttp.aiocqhttp_platform import AiocqhttpPlatform
+from .platform.sources.discord.discord_platform import DiscordPlatform
+from .platform.sources.telegram.telegram_platform import TelegramPlatform
 
 # 导入 LLM 提供商以触发注册
+from .llm.sources.openai_provider import OpenAIProvider
+from .llm.sources.openai_compatible_provider import OpenAICompatibleProvider
+from .llm.sources.gemini_provider import GeminiProvider
+from .llm.sources.glm_provider import GLMProvider
 
 
 # WebSocket 路由
 @app.websocket("/ws")
 async def ws():
     """处理 WebSocket 连接"""
-    logger.info("WebSocket 客户端已连接")
+    logger.debug("WebSocket 客户端已连接")
     try:
         while True:
             data = await websocket.receive()
             await websocket.send(f"收到: {data}")
     except Exception as e:
-        logger.error(f"WebSocket 连接错误: {e}")
+        logger.debug(f"WebSocket 连接错误: {e}")
     finally:
-        logger.info("WebSocket 客户端已断开")
+        logger.debug("WebSocket 客户端已断开")
 
 
 # 健康检查端点

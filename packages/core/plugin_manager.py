@@ -34,7 +34,7 @@ class PluginManager:
         logger.info("开始加载插件...")
         await self._load_official_plugins()
         await self._load_user_plugins()
-        logger.info(f"插件加载完成，共 {len(self.plugins)} 个插件")
+        logger.info(f"插件加载完成，共 {len(self.plugins)} 个插件已安装")
 
     async def _load_official_plugins(self) -> None:
         """加载官方插件"""
@@ -43,7 +43,7 @@ class PluginManager:
                 plugin = await self._load_plugin_from_module(module_path, name)
                 if plugin:
                     self.plugins[name] = plugin
-                    logger.info(f"已加载官方插件: {name}")
+                    logger.debug(f"已加载官方插件: {name}")
             except Exception as e:
                 logger.error(f"加载官方插件 {name} 失败: {e}")
 
@@ -69,7 +69,7 @@ class PluginManager:
                     )
                     if plugin:
                         self.plugins[name] = plugin
-                        logger.info(f"已加载用户插件: {name}")
+                        logger.debug(f"已加载用户插件: {name}")
                 except Exception as e:
                     logger.error(f"加载用户插件 {name} 失败: {e}")
 
@@ -110,7 +110,7 @@ class PluginManager:
                     plugin_cls = attr
                     break
             if not plugin_cls:
-                logger.warning(f"插件 {plugin_name} 中未找到 BasePlugin 子类")
+                logger.error(f"插件 {plugin_name} 中未找到 BasePlugin 子类")
                 return None
             # 实例化插件并处理装饰器
             plugin_instance = plugin_cls()
@@ -122,7 +122,7 @@ class PluginManager:
                 if conf_schema:
                     # 将配置 schema 附加到插件实例
                     plugin_instance.conf_schema = conf_schema
-                    logger.info(f"已加载插件 {plugin_name} 的配置 schema")
+                    logger.debug(f"已加载插件 {plugin_name} 的配置 schema")
 
             await plugin_instance.on_load()
 
@@ -153,7 +153,7 @@ class PluginManager:
             if self.platform_server and not plugin.platform_server:
                 plugin.set_platform_server(self.platform_server)
 
-            logger.info(f"已启用插件: {name}")
+            logger.debug(f"已启用插件: {name}")
             return True
         except Exception as e:
             logger.error(f"启用插件 {name} 失败: {e}")
@@ -196,7 +196,7 @@ class PluginManager:
                 # 如果之前是启用状态，重新启用
                 if name in self.enabled_plugins:
                     await self.enable_plugin(name)
-                logger.info(f"已重载插件: {name}")
+                logger.debug(f"已重载插件: {name}")
                 return True
             else:
                 logger.error(f"重载插件 {name} 失败，未能创建新实例")
@@ -235,7 +235,7 @@ class PluginManager:
             info = self.get_plugin_info(name)
             if info:
                 result[name] = info
-        logger.info(f"get_all_plugins_info returning {len(result)} plugins: {list(result.keys())}")
+        logger.debug(f"get_all_plugins_info returning {len(result)} plugins: {list(result.keys())}")
         return result
 
     async def handle_message(self, message: Any) -> None:

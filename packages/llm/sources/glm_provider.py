@@ -145,7 +145,8 @@ class GLMProvider(BaseLLMProvider):
             elif image_urls:
                 messages.append({"role": "user", "content": [{"type": "text", "text": "[图片]"}]})
 
-            completion = await self._client.chat.completions.create(
+            client = self._get_client()
+            completion = await client.chat.completions.create(
                 model=model or self.model_name,
                 messages=messages,
                 temperature=self.temperature,
@@ -242,7 +243,8 @@ class GLMProvider(BaseLLMProvider):
             elif image_urls:
                 messages.append({"role": "user", "content": [{"type": "text", "text": "[图片]"}]})
 
-            stream = await self._client.chat.completions.create(
+            client = self._get_client()
+            stream = await client.chat.completions.create(
                 model=model or self.model_name,
                 messages=messages,
                 temperature=self.temperature,
