@@ -67,6 +67,12 @@ def load_config() -> Dict[str, Any]:
             "cors": load_cors_config(),
             # LLM 回复模式: "active" (主动), "passive" (被动), "at" (艾特), "command" (命令)
             "llm_reply_mode": "active",
+            # 唤醒前缀配置（参考 AstrBot）
+            "wake_prefix": ["/", "."],
+            # 私聊是否需要唤醒前缀（参考 AstrBot）
+            "private_message_needs_wake_prefix": False,
+            # 是否忽略艾特全体成员
+            "ignore_at_all": False,
         }
     else:
         try:
@@ -80,6 +86,16 @@ def load_config() -> Dict[str, Any]:
 
     if "webui_api_enabled" not in config:
         config["webui_api_enabled"] = True
+
+    # 添加唤醒前缀默认配置（如果不存在）
+    if "wake_prefix" not in config:
+        config["wake_prefix"] = ["/", "."]
+
+    if "private_message_needs_wake_prefix" not in config:
+        config["private_message_needs_wake_prefix"] = False
+
+    if "ignore_at_all" not in config:
+        config["ignore_at_all"] = False
 
     # 合并平台源配置
     config["platforms"] = load_platforms_sources()

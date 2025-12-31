@@ -202,12 +202,12 @@ class ProcessStage(Stage):
     async def _trigger_llm_response(self, event: dict, ctx: PipelineContext) -> None:
         """触发 LLM 回复"""
         try:
-            from packages.llm import (
+            from packages.llm.context_manager import (
                 LLMContextManager,
                 ContextConfig,
                 ContextCompressionStrategy,
-                LLMResponse,
             )
+            from packages.llm.entities import LLMResponse
             from ...agent.tools import ToolRegistry, ToolDefinition, ToolCategory
             from ..config import load_config
 
@@ -674,27 +674,132 @@ class ProcessStage(Stage):
             await self._send_message(event, ctx, f"会话 {sid} 不在白名单内。")
 
     def _check_if_at_me(self, event: dict, ctx: PipelineContext) -> bool:
-        """检查消息中是否艾特了机器人"""
+        """检查消息中是否艾特了机器人或使用了唤醒前缀
+        
+        参考 AstrBot 的实现方式，支持：
+        1. 检查消息段中的 at 类型，是否艾特了机器人自己
+        2. 兼容不同格式的 self_id 和 qq 值（数字、字符串）
+        3. 支持艾特全体成员触发
+        4. 支持引用机器人的消息触发
+        5. 支持唤醒前缀（wake_prefix）触发
+        6. 私聊消息根据配置决定是否需要唤醒前缀
+        """
+        from ..config import load_config
+        
         message = event.get("message", "")
         self_id = event.get("self_id")
         message_type = event.get("message_type", "")
+        
+        # 加载配置
+        config = load_config()
+        wake_prefixes = config.get("wake_prefix", ["/", "."])
+        private_needs_wake_prefix = config.get("private_message_needs_wake_prefix", False)
+        ignore_at_all = config.get("ignore_at_all", False)
 
         logger.debug(f"检查艾特: message_type={message_type}, self_id={self_id}, message={message}")
 
         if not message or not self_id:
             return False
 
+        # 将 self_id 转换为字符串集合，方便比较
+        self_id_set = {
+            str(self_id),
+            int(self_id) if str(self_id).isdigit() else None
+        }.difference({None})
+        
+        logger.debug(f"self_id 集合: {self_id_set}")
+
         if isinstance(message, list):
-            for msg_seg in message:
+            first_seg_is_at = False
+            at_qq_first = None
+            
+            # 首先检查是否有艾特或引用
+            for i, msg_seg in enumerate(message):
                 seg_type = msg_seg.get("type", "")
                 seg_data = msg_seg.get("data", {})
                 logger.debug(f"消息段: type={seg_type}, data={seg_data}")
+                
+                # 检查 at 消息段
                 if seg_type == "at":
-                    # 统一转换为字符串进行比较，避免类型不匹配
-                    at_qq = str(seg_data.get("qq", ""))
-                    if at_qq == str(self_id):
-                        logger.debug(f"检测到艾特机器人: qq={at_qq}")
+                    at_qq = seg_data.get("qq", "")
+                    
+                    # 记录第一个 at 消息段的 QQ 号
+                    if i == 0:
+                        first_seg_is_at = True
+                        at_qq_first = at_qq
+                    
+                    # 检查是否艾特全体成员
+                    if str(at_qq) == "all":
+                        if ignore_at_all:
+                            logger.debug(f"忽略艾特全体成员")
+                            continue
+                        logger.debug(f"检测到艾特全体成员")
                         return True
+                    
+                    # 尝试多种格式比较
+                    at_qq_formats = {
+                        str(at_qq),
+                        int(at_qq) if str(at_qq).isdigit() else None
+                    }.difference({None})
+                    
+                    # 检查是否有交集
+                    if self_id_set & at_qq_formats:
+                        logger.debug(f"检测到艾特机器人: at_qq={at_qq}, self_id={self_id}")
+                        return True
+                
+                # 检查 reply 消息段（引用消息）
+                elif seg_type == "reply":
+                    reply_sender_id = seg_data.get("sender_id", "")
+                    if reply_sender_id:
+                        reply_sender_formats = {
+                            str(reply_sender_id),
+                            int(reply_sender_id) if str(reply_sender_id).isdigit() else None
+                        }.difference({None})
+                        
+                        if self_id_set & reply_sender_formats:
+                            logger.debug(f"检测到引用机器人的消息: sender_id={reply_sender_id}")
+                            return True
+
+            # 检查唤醒前缀（参考 AstrBot 的逻辑）
+            for msg_seg in message:
+                if msg_seg.get("type") == "text":
+                    text = msg_seg.get("data", {}).get("text", "")
+                    text_stripped = text.strip()
+                    
+                    # 检查是否以唤醒前缀开头
+                    for prefix in wake_prefixes:
+                        if text_stripped.startswith(prefix):
+                            # 如果是群聊且第一个消息段是艾特，需要检查是否艾特机器人
+                            if message_type == "group" and first_seg_is_at:
+                                if at_qq_first is not None and str(at_qq_first) != "all":
+                                    # 第一个艾特不是机器人也不是全体成员，不唤醒
+                                    logger.debug(f"群聊中第一个艾特不是机器人或全体成员，不唤醒")
+                                    return False
+                            logger.debug(f"检测到唤醒前缀: {prefix}")
+                            return True
+                    
+                    break
+
+            # 检查私聊消息
+            if message_type == "private" and not private_needs_wake_prefix:
+                logger.debug(f"私聊消息自动唤醒")
+                return True
+
+        elif isinstance(message, str):
+            # 纯字符串消息（兼容性处理）
+            text_stripped = message.strip()
+            
+            # 检查是否以唤醒前缀开头
+            for prefix in wake_prefixes:
+                if text_stripped.startswith(prefix):
+                    logger.debug(f"检测到唤醒前缀: {prefix}")
+                    return True
+            
+            # 检查私聊消息
+            if message_type == "private" and not private_needs_wake_prefix:
+                logger.debug(f"私聊消息自动唤醒")
+                return True
+
         return False
 
     def _check_if_command(self, event: dict, ctx: PipelineContext) -> bool:

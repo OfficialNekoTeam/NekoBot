@@ -7,11 +7,13 @@ import importlib
 import shutil
 import zipfile
 import aiohttp
+import importlib.util
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Type
 from loguru import logger
 from ..plugins.base import BasePlugin, create_plugin_decorator
 from ..plugins.plugin_data_manager import PluginDataManager
+from .hot_reload_manager import HotReloadManager
 
 
 class PluginManager:
@@ -25,6 +27,10 @@ class PluginManager:
         self.official_plugins: Dict[str, str] = {}
         self.platform_server = None
         self.plugin_data_manager = PluginDataManager()
+        
+        # 热重载管理器
+        self.hot_reload_manager: Optional[HotReloadManager] = None
+        self._hot_reload_enabled = False
 
     async def load_plugins(self) -> None:
         """加载所有插件（官方 + 用户）"""
@@ -250,6 +256,165 @@ class PluginManager:
                 except Exception as e:
                     logger.error(f"插件 {name} 执行命令 {command} 出错: {e}")
         return False
+
+    async def reload_plugin(self, name: str) -> bool:
+        """重载插件（增强版，支持模块清理）
+        
+        Args:
+            name: 插件名称
+            
+        Returns:
+            重载是否成功
+        """
+        if name not in self.plugins:
+            logger.error(f"插件 {name} 不存在")
+            return False
+        
+        try:
+            # 1. 获取插件模块路径
+            plugin = self.plugins[name]
+            module_path = None
+            
+            # 从插件实例获取模块信息
+            if hasattr(plugin, '__module__'):
+                module_path = plugin.__module__
+            elif name in self.official_plugins:
+                module_path = self.official_plugins[name]
+            else:
+                module_path = f"{name}.main"
+            
+            # 2. 清理相关模块缓存
+            await self._cleanup_plugin_modules(module_path)
+            
+            # 3. 禁用插件
+            was_enabled = name in self.enabled_plugins
+            await self.disable_plugin(name)
+            
+            # 4. 重新加载模块
+            spec = importlib.util.find_spec(module_path)
+            if spec and spec.loader:
+                # 如果模块已加载，先移除
+                if module_path in sys.modules:
+                    del sys.modules[module_path]
+                    logger.debug(f"已移除模块 {module_path} from sys.modules")
+                
+                # 重新导入模块
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                
+                # 查找插件类
+                plugin_cls: Optional[Type[BasePlugin]] = None
+                for attr_name in dir(module):
+                    attr = getattr(module, attr_name)
+                    if (
+                        isinstance(attr, type)
+                        and issubclass(attr, BasePlugin)
+                        and attr is not BasePlugin
+                    ):
+                        plugin_cls = attr
+                        break
+                
+                if not plugin_cls:
+                    logger.error(f"插件 {name} 中未找到 BasePlugin 子类")
+                    return False
+                
+                # 5. 创建新插件实例
+                new_plugin = plugin_cls()
+                create_plugin_decorator(new_plugin)
+                
+                # 6. 加载插件配置
+                plugin_path = self.plugin_dir / name
+                if plugin_path.exists():
+                    conf_schema = self.plugin_data_manager.load_conf_schema(plugin_path)
+                    if conf_schema:
+                        new_plugin.conf_schema = conf_schema
+                
+                # 7. 调用 on_load
+                await new_plugin.on_load()
+                
+                # 8. 设置平台服务器引用
+                if self.platform_server:
+                    new_plugin.set_platform_server(self.platform_server)
+                
+                # 9. 替换插件实例
+                self.plugins[name] = new_plugin
+                
+                # 10. 如果之前是启用状态，重新启用
+                if was_enabled:
+                    await new_plugin.on_enable()
+                    new_plugin.enabled = True
+                    self.enabled_plugins.append(name)
+                
+                logger.info(f"插件 {name} 重载成功")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"重载插件 {name} 失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+    
+    async def _cleanup_plugin_modules(self, module_path: str) -> None:
+        """清理插件相关的模块
+        
+        Args:
+            module_path: 模块路径
+        """
+        # 清理以插件路径开头的所有模块
+        modules_to_remove = [
+            mod_name for mod_name in sys.modules.keys()
+            if mod_name.startswith(module_path.split('.')[0])
+        ]
+        
+        for mod_name in modules_to_remove:
+            if mod_name in sys.modules:
+                del sys.modules[mod_name]
+                logger.debug(f"已清理模块: {mod_name}")
+    
+    def enable_hot_reload(self) -> None:
+        """启用插件热重载"""
+        if self._hot_reload_enabled:
+            logger.warning("热重载已启用")
+            return
+        
+        try:
+            from .hot_reload_manager import HotReloadManager
+            
+            config_dir = Path(__file__).parent.parent.parent / "data" / "config"
+            
+            self.hot_reload_manager = HotReloadManager(
+                plugin_dir=self.plugin_dir,
+                config_dir=config_dir,
+                plugin_reload_callback=self.reload_plugin,
+                config_reload_callback=lambda name: None  # 配置重载暂不处理
+            )
+            
+            self._hot_reload_enabled = True
+            logger.info("插件热重载已启用")
+            
+        except ImportError as e:
+            logger.warning(f"无法启用热重载: {e}")
+        except Exception as e:
+            logger.error(f"启用热重载失败: {e}")
+    
+    def disable_hot_reload(self) -> None:
+        """禁用插件热重载"""
+        if not self._hot_reload_enabled:
+            return
+        
+        if self.hot_reload_manager:
+            import asyncio
+            asyncio.create_task(self.hot_reload_manager.stop())
+            self.hot_reload_manager = None
+        
+        self._hot_reload_enabled = False
+        logger.info("插件热重载已禁用")
+    
+    def is_hot_reload_enabled(self) -> bool:
+        """检查热重载是否启用"""
+        return self._hot_reload_enabled
 
     async def unload_all(self) -> None:
         """卸载所有插件，调用 on_unload 并清空内部状态"""

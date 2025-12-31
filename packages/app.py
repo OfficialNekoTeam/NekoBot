@@ -57,6 +57,11 @@ from .core.server import (
 # 导入动态注册管理器
 from .llm.dynamic_register import dynamic_register_manager
 
+# 导入热重载相关模块
+from .core.hot_reload_manager import HotReloadManager
+from .core.config_reload_manager import config_reload_manager
+from .routes.dynamic_route_manager import DynamicRouteManager
+
 # 动态注册LLM提供商和平台适配器
 logger.info("开始动态注册组件...")
 dynamic_register_manager.dynamic_register_llm_providers()
@@ -81,6 +86,7 @@ from .routes.stat_route import StatRoute
 from .routes.system_route import SystemRoute
 from .routes.tool_prompt_route import ToolPromptRoute
 from .routes.system_prompt_route import SystemPromptRoute
+from .routes.hot_reload_route import HotReloadRoute
 
 # 初始化应用状态
 app.plugins = {
@@ -88,6 +94,19 @@ app.plugins = {
     "platform_manager": platform_manager,
     "event_queue": event_queue,
 }
+
+# 初始化热重载管理器
+hot_reload_manager = HotReloadManager(
+    plugin_dir=Path("data/plugins"),
+    config_dir=Path("data/config"),
+    plugin_reload_callback=plugin_manager.reload_plugin,
+    config_reload_callback=config_reload_manager.reload_config
+)
+app.plugins["hot_reload_manager"] = hot_reload_manager
+
+# 初始化动态路由管理器
+dynamic_route_manager = DynamicRouteManager(app)
+app.plugins["dynamic_route_manager"] = dynamic_route_manager
 
 # 创建路由上下文
 route_context = RouteContext(CONFIG, app)
@@ -110,6 +129,9 @@ system_route = SystemRoute(route_context)
 tool_prompt_route = ToolPromptRoute(route_context)
 system_prompt_route = SystemPromptRoute(route_context)
 
+# 初始化热重载路由
+hot_reload_route = HotReloadRoute(route_context)
+
 # 注册所有路由
 for route_class in [
     bot_config_route,
@@ -128,6 +150,7 @@ for route_class in [
     system_route,
     tool_prompt_route,
     system_prompt_route,
+    hot_reload_route,
 ]:
     for path, method, handler in route_class.routes:
         app.add_url_rule(path, view_func=handler, methods=[method])
@@ -473,6 +496,22 @@ async def run_app():
     """启动 Quart 应用"""
     # 启动核心服务器
     await start_core_server()
+    
+    # 启动插件热重载（如果启用）
+    hot_reload_enabled = CONFIG.get("hot_reload_enabled", False)
+    if hot_reload_enabled:
+        await hot_reload_manager.start()
+        logger.info("插件热重载已启动")
+    else:
+        logger.info("插件热重载未启用，可通过配置启用")
+    
+    # 加载初始插件
+    await plugin_manager.load_plugins()
+    
+    # 自动启用所有插件
+    for plugin_name in list(plugin_manager.plugins.keys()):
+        await plugin_manager.enable_plugin(plugin_name)
+    logger.info("所有插件已启用")
 
     # 运行 Quart 应用
     host = CONFIG.get("server", {}).get("host", "0.0.0.0")
