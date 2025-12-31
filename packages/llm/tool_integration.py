@@ -6,7 +6,7 @@
 from typing import Dict, List, Optional, Any
 from loguru import logger
 
-from ..agent.base import ToolRegistry, ToolDefinition, ToolCall
+from ..agent.tools import ToolRegistry, ToolDefinition, ToolCall
 
 
 class LLMToolIntegration:

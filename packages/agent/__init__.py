@@ -4,7 +4,7 @@
 """
 
 from .base import BaseAgent
-from .tools import FunctionTool, HandoffTool, ToolRegistry
+from .tools import FunctionTool, HandoffTool, ToolRegistry, ToolDefinition, ToolCategory, ToolCall
 from .mcp import MCPClient, MCPServer
 from .executor import AgentExecutor
 
@@ -13,6 +13,9 @@ __all__ = [
     "FunctionTool",
     "HandoffTool",
     "ToolRegistry",
+    "ToolDefinition",
+    "ToolCategory",
+    "ToolCall",
     "MCPClient",
     "MCPServer",
     "AgentExecutor",

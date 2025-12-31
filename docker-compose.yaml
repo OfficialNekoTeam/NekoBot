@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   nekobot:
-    image: nekobotteam/nekobot:latest
+    image: ChuranNeko/Nekobot:latest
     container_name: nekobot
     ports:
       - "6285:6285"

@@ -204,12 +204,12 @@ class ProcessStage(Stage):
         """触发 LLM 回复"""
         try:
             from packages.llm import (
-                ContextManager,
+                LLMContextManager,
                 ContextConfig,
                 ContextCompressionStrategy,
                 LLMResponse,
             )
-            from ...agent.base import ToolRegistry, ToolDefinition, ToolCategory
+            from ...agent.tools import ToolRegistry, ToolDefinition, ToolCategory
             from ..config import load_config
 
             message_text = self._format_message(event, simple=False)
@@ -379,7 +379,7 @@ class ProcessStage(Stage):
                 max_messages=provider_config.get("max_messages", 20),
                 compression_strategy=ContextCompressionStrategy(compression_strategy_name),
             )
-            context_manager = ContextManager(context_config)
+            context_manager = LLMContextManager(context_config)
 
             response: LLMResponse = await provider.text_chat(
                 prompt=message_text,

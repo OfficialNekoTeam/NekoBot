@@ -3,7 +3,7 @@
 演示如何使用平台服务器发送消息
 """
 
-from plugins.base import (
+from .base import (
     BasePlugin,
     register,
     on_message,

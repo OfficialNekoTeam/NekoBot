@@ -12,7 +12,11 @@ from .register import (
     LLMProviderType,
 )
 from .entities import LLMResponse, TokenUsage
-from .context_manager import LLMContextManager
+from .context_manager import (
+    LLMContextManager,
+    ContextConfig,
+    ContextCompressionStrategy,
+)
 
 # 导入所有 LLM 提供商以自动注册
 from .sources import (
@@ -37,4 +41,6 @@ __all__ = [
     "LLMResponse",
     "TokenUsage",
     "LLMContextManager",
+    "ContextConfig",
+    "ContextCompressionStrategy",
 ]

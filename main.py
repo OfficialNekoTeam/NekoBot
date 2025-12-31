@@ -25,7 +25,7 @@ logger.add(
 
 async def reset_password():
     """重置用户密码"""
-    from packages.auth.user import reset_user_password
+    from packages.auth import reset_user_password
 
     print("请输入新密码：")
     password1 = getpass.getpass("密码: ")
