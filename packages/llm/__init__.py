@@ -1,46 +1,36 @@
-"""LLM Provider 模块
+"""LLM 模块
 
-提供 LLM 服务提供商的抽象接口和具体实现
+提供统一的 LLM 服务商接口
 """
 
 from .base import BaseLLMProvider
-from .register import (
-    register_llm_provider,
-    llm_provider_registry,
-    llm_provider_cls_map,
-    LLMProviderMetaData,
-    LLMProviderType,
-)
-from .entities import LLMResponse, TokenUsage
-from .context_manager import (
-    LLMContextManager,
-    ContextConfig,
-    ContextCompressionStrategy,
-)
-
-# 导入所有 LLM 提供商以自动注册
 from .sources import (
     openai_provider,
-    gemini_provider,
-    glm_provider,
     openai_compatible_provider,
     claude_provider,
-    deepseek_provider,
+    gemini_provider,
+    glm_provider,
     dashscope_provider,
+    deepseek_provider,
     moonshot_provider,
+    ollama_provider,
+    lm_studio_provider,
     zhipu_provider,
 )
 
 __all__ = [
+    # Base 类
     "BaseLLMProvider",
-    "register_llm_provider",
-    "llm_provider_registry",
-    "llm_provider_cls_map",
-    "LLMProviderMetaData",
-    "LLMProviderType",
-    "LLMResponse",
-    "TokenUsage",
-    "LLMContextManager",
-    "ContextConfig",
-    "ContextCompressionStrategy",
+    # Provider 类
+    "OpenAIProvider",
+    "OpenAICompatibleProvider",
+    "ClaudeProvider",
+    "GeminiProvider",
+    "GLMProvider",
+    "DashScopeProvider",
+    "DeepSeekProvider",
+    "MoonshotProvider",
+    "OllamaProvider",
+    "LMStudioProvider",
+    "ZhipuProvider",
 ]

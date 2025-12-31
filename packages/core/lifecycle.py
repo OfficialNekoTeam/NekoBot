@@ -352,16 +352,21 @@ class NekoBotLifecycle:
 
 
 # 创建全局生命周期实例
-lifecycle: Optional[NekoBotLifecycle] = None
+lifecycle = NekoBotLifecycle()
 
 
 async def get_lifecycle() -> NekoBotLifecycle:
-    """获取或创建全局生命周期实例
+    """获取全局生命周期实例
 
     Returns:
         生命周期实例
     """
-    global lifecycle
-    if lifecycle is None:
-        lifecycle = NekoBotLifecycle()
     return lifecycle
+
+
+# 显式导出的符号
+__all__ = [
+    "NekoBotLifecycle",
+    "lifecycle",
+    "get_lifecycle"
+]

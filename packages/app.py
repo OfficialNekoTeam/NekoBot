@@ -13,7 +13,7 @@ from .core.config import load_config
 logger.remove()
 logger.add(
     sys.stdout,
-    format="{time:YYYY-MM-DD HH:mm:ss.SSS} <level>[{level}]</level> {message}",
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> <level>[{level}]</level> {message}",
     level="DEBUG",
     colorize=True,
 )
@@ -54,6 +54,15 @@ from .core.server import (
     start_server as start_core_server,
 )
 
+# 导入动态注册管理器
+from .llm.dynamic_register import dynamic_register_manager
+
+# 动态注册LLM提供商和平台适配器
+logger.info("开始动态注册组件...")
+dynamic_register_manager.dynamic_register_llm_providers()
+dynamic_register_manager.dynamic_register_platform_adapters()
+logger.info("动态注册组件完成")
+
 # 导入路由模块
 from .routes.route import RouteContext
 from .routes.bot_config import BotConfigRoute
@@ -70,6 +79,8 @@ from .routes.auth_route import AuthRoute
 from .routes.platforms_route import PlatformsRoute
 from .routes.stat_route import StatRoute
 from .routes.system_route import SystemRoute
+from .routes.tool_prompt_route import ToolPromptRoute
+from .routes.system_prompt_route import SystemPromptRoute
 
 # 初始化应用状态
 app.plugins = {
@@ -96,6 +107,8 @@ auth_route = AuthRoute(route_context)
 platforms_route = PlatformsRoute(route_context)
 stat_route = StatRoute(route_context)
 system_route = SystemRoute(route_context)
+tool_prompt_route = ToolPromptRoute(route_context)
+system_prompt_route = SystemPromptRoute(route_context)
 
 # 注册所有路由
 for route_class in [
@@ -113,6 +126,8 @@ for route_class in [
     platforms_route,
     stat_route,
     system_route,
+    tool_prompt_route,
+    system_prompt_route,
 ]:
     for path, method, handler in route_class.routes:
         app.add_url_rule(path, view_func=handler, methods=[method])

@@ -22,7 +22,6 @@ class RateLimitStage(Stage):
 
     async def initialize(self, ctx: PipelineContext) -> None:
         """初始化阶段"""
-        logger.debug("RateLimitStage 初始化")
 
     async def process(
         self, event: dict, ctx: PipelineContext

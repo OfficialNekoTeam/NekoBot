@@ -59,7 +59,6 @@ def register_stage(stage_cls: type) -> type:
         )
 
     _stage_registry[stage_name] = stage_cls
-    logger.debug(f"已注册 Stage: {stage_name}")
 
     return stage_cls
 
@@ -96,6 +95,5 @@ def unregister_stage(stage_name: str) -> bool:
     """
     if stage_name in _stage_registry:
         del _stage_registry[stage_name]
-        logger.debug(f"已注销 Stage: {stage_name}")
         return True
     return False

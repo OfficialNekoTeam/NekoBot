@@ -44,12 +44,13 @@ class PipelineScheduler:
 
         # 首次执行时初始化所有阶段
         if not self._initialized:
+            logger.info("开始初始化Pipeline阶段...")
             for stage in self.stages:
                 try:
                     await stage.initialize(pipeline_ctx)
-                    logger.debug(f"阶段 {stage.__class__.__name__} 已初始化")
                 except Exception as e:
                     logger.error(f"阶段 {stage.__class__.__name__} 初始化失败: {e}")
+            logger.info(f"Pipeline阶段初始化完成，共 {len(self.stages)} 个阶段")
             self._initialized = True
 
         # 检查事件中是否已有 EventStopper
@@ -80,7 +81,7 @@ class PipelineScheduler:
         for i in range(from_stage, len(self.stages)):
             # 检查事件是否已停止
             if event_stopper and event_stopper.is_stopped():
-                logger.debug(
+                logger.info(
                     f"事件已停止: {event_stopper.reason}，终止流水线执行"
                 )
                 return
@@ -93,18 +94,16 @@ class PipelineScheduler:
 
                 if result is None:
                     # 阶段返回 None，继续下一个阶段
-                    logger.debug(f"阶段 {stage.__class__.__name__} 返回 None，继续下一个阶段")
                     continue
 
                 # 检查是否是异步生成器（洋葱模型）
                 if isinstance(result, AsyncGenerator):
-                    logger.debug(f"阶段 {stage.__class__.__name__} 返回 AsyncGenerator，开始洋葱模型处理")
                     async for _ in result:
                         # 暂停点：前置处理已完成
 
                         # 再次检查事件是否已停止
                         if event_stopper and event_stopper.is_stopped():
-                            logger.debug(
+                            logger.info(
                                 f"事件已停止（前置处理后）: {event_stopper.reason}"
                             )
                             return
@@ -116,18 +115,17 @@ class PipelineScheduler:
 
                         # 再次检查事件是否已停止
                         if event_stopper and event_stopper.is_stopped():
-                            logger.debug(
+                            logger.info(
                                 f"事件已停止（后置处理后）: {event_stopper.reason}"
                             )
                             return
                 else:
                     # 普通协程，等待完成
                     await result
-                    logger.debug(f"阶段 {stage.__class__.__name__} 已完成")
 
                 # 检查事件是否已停止
                 if event_stopper and event_stopper.is_stopped():
-                    logger.debug(
+                    logger.info(
                         f"阶段 {stage.__class__.__name__} 处理后事件已停止: {event_stopper.reason}"
                     )
                     return
@@ -181,12 +179,13 @@ class PipelineScheduler:
         Args:
             ctx: Pipeline 上下文
         """
+        logger.info("开始初始化Pipeline阶段...")
         for stage in self.stages:
             try:
                 await stage.initialize(ctx)
-                logger.debug(f"阶段 {stage.__class__.__name__} 已初始化")
             except Exception as e:
                 logger.error(f"阶段 {stage.__class__.__name__} 初始化失败: {e}")
+        logger.info(f"Pipeline阶段初始化完成，共 {len(self.stages)} 个阶段")
         self._initialized = True
 
     def get_stages(self) -> List[Stage]:

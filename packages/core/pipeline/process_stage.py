@@ -17,7 +17,6 @@ class ProcessStage(Stage):
 
     async def initialize(self, ctx: PipelineContext) -> None:
         """初始化阶段"""
-        logger.debug("ProcessStage 初始化")
 
     async def process(
         self, event: dict, ctx: PipelineContext
@@ -313,29 +312,33 @@ class ProcessStage(Stage):
                 enabled=True
             ))
 
+            # 从 prompt_manager 获取工具提示词
+            from packages.core.prompt_manager import prompt_manager
+            
             # 构建工具列表描述
-            tools_desc = """=== 可用工具列表 ===
+            tools_desc = "=== 可用工具列表 ===\n\n"
+            for tool in tool_registry.list_tools():
+                tool_prompt = prompt_manager.get_tool_prompt(tool.name)
+                tools_desc += f"【{tool.name}】\n- 功能: {tool_prompt}\n- 描述: {tool.description}\n\n"
+            tools_desc += "=== 工具说明 ===\n这些工具可以帮助你更好地理解当前对话环境和用户需求。你可以在回答中主动提及这些工具，或根据用户需求调用相关工具获取信息。"
 
-【get_user_info】
-- 功能: 获取当前对话用户的详细信息
-- 用途: 可以查询用户的QQ号、昵称、显示名称、消息类型等信息
-- 使用场景: 当需要了解用户身份或引用用户信息时使用
-
-【get_group_info】
-- 功能: 获取当前群组的详细信息
-- 用途: 可以查询群组ID、群组名称等信息（仅群聊时可用）
-- 使用场景: 当需要在群聊中提及群组信息时使用
-
-【list_tools】
-- 功能: 列出所有可用的工具及其详细描述
-- 用途: 可以查看当前环境中可用的所有工具
-- 使用场景: 当用户询问可用工具或需要了解环境功能时使用
-
-=== 工具说明 ===
-这些工具可以帮助你更好地理解当前对话环境和用户需求。你可以在回答中主动提及这些工具，或根据用户需求调用相关工具获取信息。"""
-
+            # 从 prompt_manager 获取人格提示词
+            personality_prompt = ""
+            try:
+                # 获取所有启用的人格提示词
+                enabled_personalities = prompt_manager.get_enabled_personalities()
+                if enabled_personalities:
+                    # 使用第一个启用的人格
+                    personality_prompt = enabled_personalities[0]["prompt"]
+            except Exception as e:
+                logger.warning(f"加载人格提示词失败: {e}，使用默认提示词")
+                personality_prompt = ""
+            
+            # 从 prompt_manager 获取系统提示词
+            system_prompt_base = prompt_manager.get_system_prompt()
+            
             # 构建用户信息系统提示词
-            user_info_prompt = f"""你是 NekoBot，一个智能聊天机器人框架中的 AI 助手。
+            user_info_prompt = f"""{system_prompt_base}
 
 === 当前对话环境 ===
 - 用户: {user_disp}
@@ -350,6 +353,8 @@ class ProcessStage(Stage):
 {f"4. 当前群组: {group_name} ({group_id})" if message_type == 'group' and group_name else ""}
 
 {tools_desc}
+
+{personality_prompt}
 
 === 你的角色和任务 ===
 1. 你是一个友好、专业的 AI 助手

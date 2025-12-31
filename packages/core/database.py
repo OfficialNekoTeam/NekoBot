@@ -145,6 +145,43 @@ class DatabaseManager:
                 )
             """)
 
+            # 工具提示词表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS tool_prompts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tool_name TEXT NOT NULL UNIQUE,
+                    prompt TEXT NOT NULL,
+                    description TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 系统提示词表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_prompts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    prompt TEXT NOT NULL,
+                    description TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 人格表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS personalities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    prompt TEXT NOT NULL,
+                    description TEXT,
+                    enabled INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             conn.commit()
             logger.info("数据库表结构初始化完成")
 
@@ -1026,6 +1063,462 @@ class DatabaseManager:
                 for row in rows
             ]
 
+    # ========== 工具提示词相关操作 ==========
+
+    def get_tool_prompt(self, tool_name: str) -> Optional[Dict[str, Any]]:
+        """获取工具提示词
+
+        Args:
+            tool_name: 工具名称
+
+        Returns:
+            工具提示词信息，如果不存在则返回None
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM tool_prompts WHERE tool_name = ?",
+                (tool_name,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "id": row["id"],
+                    "tool_name": row["tool_name"],
+                    "prompt": row["prompt"],
+                    "description": row["description"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+            return None
+
+    def create_tool_prompt(self, tool_name: str, prompt: str, description: str = "") -> bool:
+        """创建工具提示词
+
+        Args:
+            tool_name: 工具名称
+            prompt: 提示词内容
+            description: 描述
+
+        Returns:
+            是否创建成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO tool_prompts (tool_name, prompt, description) VALUES (?, ?, ?)",
+                    (tool_name, prompt, description)
+                )
+                conn.commit()
+                logger.info(f"工具提示词 {tool_name} 创建成功")
+                return True
+        except sqlite3.IntegrityError:
+            logger.warning(f"工具提示词 {tool_name} 已存在")
+            return False
+        except Exception as e:
+            logger.error(f"创建工具提示词失败: {e}")
+            return False
+
+    def update_tool_prompt(self, tool_name: str, prompt: Optional[str] = None, description: Optional[str] = None) -> bool:
+        """更新工具提示词
+
+        Args:
+            tool_name: 工具名称
+            prompt: 新的提示词内容
+            description: 新的描述
+
+        Returns:
+            是否更新成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # 构建更新语句
+                updates = []
+                params = []
+                if prompt is not None:
+                    updates.append("prompt = ?")
+                    params.append(prompt)
+                if description is not None:
+                    updates.append("description = ?")
+                    params.append(description)
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                params.append(tool_name)
+                
+                cursor.execute(
+                    f"UPDATE tool_prompts SET {', '.join(updates)} WHERE tool_name = ?",
+                    params
+                )
+                conn.commit()
+                logger.info(f"工具提示词 {tool_name} 更新成功")
+                return True
+        except Exception as e:
+            logger.error(f"更新工具提示词失败: {e}")
+            return False
+
+    def delete_tool_prompt(self, tool_name: str) -> bool:
+        """删除工具提示词
+
+        Args:
+            tool_name: 工具名称
+
+        Returns:
+            是否删除成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM tool_prompts WHERE tool_name = ?",
+                    (tool_name,)
+                )
+                conn.commit()
+                logger.info(f"工具提示词 {tool_name} 删除成功")
+                return True
+        except Exception as e:
+            logger.error(f"删除工具提示词失败: {e}")
+            return False
+
+    def get_all_tool_prompts(self) -> List[Dict[str, Any]]:
+        """获取所有工具提示词
+
+        Returns:
+            工具提示词列表
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM tool_prompts ORDER BY id")
+            rows = cursor.fetchall()
+            return [
+                {
+                    "id": row["id"],
+                    "tool_name": row["tool_name"],
+                    "prompt": row["prompt"],
+                    "description": row["description"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in rows
+            ]
+
+    # ========== 系统提示词相关操作 ==========
+
+    def get_system_prompt(self, name: str) -> Optional[Dict[str, Any]]:
+        """获取系统提示词
+
+        Args:
+            name: 提示词名称
+
+        Returns:
+            系统提示词信息，如果不存在则返回None
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM system_prompts WHERE name = ?",
+                (name,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "prompt": row["prompt"],
+                    "description": row["description"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+            return None
+
+    def create_system_prompt(self, name: str, prompt: str, description: str = "") -> bool:
+        """创建系统提示词
+
+        Args:
+            name: 提示词名称
+            prompt: 提示词内容
+            description: 描述
+
+        Returns:
+            是否创建成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO system_prompts (name, prompt, description) VALUES (?, ?, ?)",
+                    (name, prompt, description)
+                )
+                conn.commit()
+                logger.info(f"系统提示词 {name} 创建成功")
+                return True
+        except sqlite3.IntegrityError:
+            logger.warning(f"系统提示词 {name} 已存在")
+            return False
+        except Exception as e:
+            logger.error(f"创建系统提示词失败: {e}")
+            return False
+
+    def update_system_prompt(self, name: str, prompt: Optional[str] = None, description: Optional[str] = None) -> bool:
+        """更新系统提示词
+
+        Args:
+            name: 提示词名称
+            prompt: 新的提示词内容
+            description: 新的描述
+
+        Returns:
+            是否更新成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # 构建更新语句
+                updates = []
+                params = []
+                if prompt is not None:
+                    updates.append("prompt = ?")
+                    params.append(prompt)
+                if description is not None:
+                    updates.append("description = ?")
+                    params.append(description)
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                params.append(name)
+                
+                cursor.execute(
+                    f"UPDATE system_prompts SET {', '.join(updates)} WHERE name = ?",
+                    params
+                )
+                conn.commit()
+                logger.info(f"系统提示词 {name} 更新成功")
+                return True
+        except Exception as e:
+            logger.error(f"更新系统提示词失败: {e}")
+            return False
+
+    def delete_system_prompt(self, name: str) -> bool:
+        """删除系统提示词
+
+        Args:
+            name: 提示词名称
+
+        Returns:
+            是否删除成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM system_prompts WHERE name = ?",
+                    (name,)
+                )
+                conn.commit()
+                logger.info(f"系统提示词 {name} 删除成功")
+                return True
+        except Exception as e:
+            logger.error(f"删除系统提示词失败: {e}")
+            return False
+
+    def get_all_system_prompts(self) -> List[Dict[str, Any]]:
+        """获取所有系统提示词
+
+        Returns:
+            系统提示词列表
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM system_prompts ORDER BY id")
+            rows = cursor.fetchall()
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "prompt": row["prompt"],
+                    "description": row["description"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in rows
+            ]
+
+    # ========== 人格相关操作 ==========
+
+    def get_personality(self, name: str) -> Optional[Dict[str, Any]]:
+        """获取人格信息
+
+        Args:
+            name: 人格名称
+
+        Returns:
+            人格信息，如果不存在则返回None
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM personalities WHERE name = ?",
+                (name,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "prompt": row["prompt"],
+                    "description": row["description"],
+                    "enabled": bool(row["enabled"]),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+            return None
+
+    def create_personality(self, name: str, prompt: str, description: str = "", enabled: bool = True) -> bool:
+        """创建人格
+
+        Args:
+            name: 人格名称
+            prompt: 人格提示词内容
+            description: 描述
+            enabled: 是否启用
+
+        Returns:
+            是否创建成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO personalities (name, prompt, description, enabled) VALUES (?, ?, ?, ?)",
+                    (name, prompt, description, 1 if enabled else 0)
+                )
+                conn.commit()
+                logger.info(f"人格 {name} 创建成功")
+                return True
+        except sqlite3.IntegrityError:
+            logger.warning(f"人格 {name} 已存在")
+            return False
+        except Exception as e:
+            logger.error(f"创建人格失败: {e}")
+            return False
+
+    def update_personality(self, name: str, prompt: Optional[str] = None, description: Optional[str] = None, enabled: Optional[bool] = None) -> bool:
+        """更新人格
+
+        Args:
+            name: 人格名称
+            prompt: 新的人格提示词内容
+            description: 新的描述
+            enabled: 是否启用
+
+        Returns:
+            是否更新成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # 构建更新语句
+                updates = []
+                params = []
+                if prompt is not None:
+                    updates.append("prompt = ?")
+                    params.append(prompt)
+                if description is not None:
+                    updates.append("description = ?")
+                    params.append(description)
+                if enabled is not None:
+                    updates.append("enabled = ?")
+                    params.append(1 if enabled else 0)
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                params.append(name)
+                
+                cursor.execute(
+                    f"UPDATE personalities SET {', '.join(updates)} WHERE name = ?",
+                    params
+                )
+                conn.commit()
+                logger.info(f"人格 {name} 更新成功")
+                return True
+        except Exception as e:
+            logger.error(f"更新人格失败: {e}")
+            return False
+
+    def delete_personality(self, name: str) -> bool:
+        """删除人格
+
+        Args:
+            name: 人格名称
+
+        Returns:
+            是否删除成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM personalities WHERE name = ?",
+                    (name,)
+                )
+                conn.commit()
+                logger.info(f"人格 {name} 删除成功")
+                return True
+        except Exception as e:
+            logger.error(f"删除人格失败: {e}")
+            return False
+
+    def get_all_personalities(self) -> List[Dict[str, Any]]:
+        """获取所有人格
+
+        Returns:
+            人格列表
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM personalities ORDER BY id")
+            rows = cursor.fetchall()
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "prompt": row["prompt"],
+                    "description": row["description"],
+                    "enabled": bool(row["enabled"]),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in rows
+            ]
+
+    def get_enabled_personalities(self) -> List[Dict[str, Any]]:
+        """获取所有启用的人格
+
+        Returns:
+            启用的人格列表
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM personalities WHERE enabled = 1 ORDER BY id")
+            rows = cursor.fetchall()
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "prompt": row["prompt"],
+                    "description": row["description"],
+                    "enabled": bool(row["enabled"]),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in rows
+            ]
+
+
+# 显式导出的符号
+__all__ = [
+    "DatabaseManager",
+    "db_manager"
+]
 
 # 创建全局数据库管理器实例
 db_manager = DatabaseManager()

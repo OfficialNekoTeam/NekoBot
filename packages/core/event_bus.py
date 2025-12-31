@@ -401,3 +401,15 @@ def emit_sync(event_type: str, data: dict):
         data: 事件数据
     """
     event_bus.emit(event_type, data)
+
+
+# 显式导出的符号
+__all__ = [
+    "EventBus",
+    "EventPriority",
+    "event_bus",
+    "on",
+    "on_any",
+    "emit",
+    "emit_sync"
+]

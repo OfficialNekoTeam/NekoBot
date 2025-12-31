@@ -17,7 +17,7 @@ import getpass
 logger.remove()
 logger.add(
     sys.stdout,
-    format="{time:YYYY-MM-DD HH:mm:ss.SSS} <level>[{level}]</level> {message}",
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> <level>[{level}]</level> {message}",
     level="DEBUG",
     colorize=True,
 )

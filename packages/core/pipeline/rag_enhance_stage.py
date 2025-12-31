@@ -17,12 +17,10 @@ class RAGEnhanceStage(Stage):
 
     def __init__(self, ctx: PipelineContext) -> None:
         """初始化阶段"""
-        logger.debug("RAGEnhanceStage 初始化")
         self.knowledge_manager = KnowledgeManager(ctx.db, {})
 
     async def initialize(self, ctx: PipelineContext) -> None:
         """初始化阶段"""
-        logger.debug("RAGEnhanceStage 初始化完成")
 
     async def process(
         self,
@@ -51,7 +49,6 @@ class RAGEnhanceStage(Stage):
         max_docs = rag_config.get("max_docs", 5)
 
         if not enabled:
-            logger.debug("RAG 未启用，跳过知识库检索")
             return
 
         logger.info(f"RAG 已启用，阈值: {threshold}，最大文档数: {max_docs}")
@@ -59,14 +56,12 @@ class RAGEnhanceStage(Stage):
         # 提取查询内容
         message_text = self._extract_text_content(event)
         if not message_text:
-            logger.debug("消息内容为空，跳过 RAG")
             return
 
         # 检索知识库
         retrieval_result = await self._retrieve_knowledge(message_text, threshold, max_docs)
 
         if not retrieval_result or not retrieval_result.results:
-            logger.debug("知识库检索无结果，跳过 RAG 注入")
             return
 
         # 构建增强上下文
@@ -77,7 +72,7 @@ class RAGEnhanceStage(Stage):
             ctx.data["rag_context"] = {}
         ctx.data["rag_context"][event.get("platform_id", "unknown")] = enhanced_context
 
-        logger.debug(f"RAG 上下文已注入，包含 {len(retrieval_result.results)} 个相关文档")
+        logger.info(f"RAG 上下文已注入，包含 {len(retrieval_result.results)} 个相关文档")
 
     async def _extract_text_content(self, event: dict) -> str:
         """提取消息文本内容"""

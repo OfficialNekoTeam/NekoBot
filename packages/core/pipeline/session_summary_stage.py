@@ -16,7 +16,6 @@ class SessionSummaryStage(Stage):
 
     async def initialize(self, ctx: PipelineContext) -> None:
         """初始化阶段"""
-        logger.debug("SessionSummaryStage 初始化")
         self.session_manager = ctx.session_manager
 
     async def process(

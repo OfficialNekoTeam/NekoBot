@@ -16,7 +16,6 @@ class WakingCheckStage(Stage):
 
     async def initialize(self, ctx: PipelineContext) -> None:
         """初始化阶段"""
-        logger.debug("WakingCheckStage 初始化")
 
     async def process(
         self, event: dict, ctx: PipelineContext
@@ -58,7 +57,6 @@ class WakingCheckStage(Stage):
 
         # 检查是否以唤醒前缀开头
         if not any(text.startswith(prefix) for prefix in prefixes):
-            logger.debug("消息不包含唤醒前缀，忽略消息")
             event["_stopped"] = True
             return None
 
