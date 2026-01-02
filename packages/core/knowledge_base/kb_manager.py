@@ -6,7 +6,7 @@
 from typing import List, Dict, Any, Optional
 from loguru import logger
 
-from .base import VectorDatabase
+from ..vector_db.base import VectorDatabase
 from .models import KnowledgeBase
 
 
@@ -164,8 +164,82 @@ class KnowledgeBaseManager:
             logger.warning(f"知识库 {kb_id} 不存在")
             return False
 
+        # 从向量数据库删除文档
+        if self.vector_db:
+            try:
+                await self.vector_db.delete(doc_id)
+                logger.info(f"已从向量数据库删除文档: {doc_id}")
+            except Exception as e:
+                logger.error(f"从向量数据库删除文档失败: {e}")
+
         logger.info(f"已从知识库 {kb_id} 中删除文档: {doc_id}")
         return True
+
+    async def get_document(self, kb_id: str, doc_id: str) -> Dict[str, Any] | None:
+        """获取单个文档详情
+
+        Args:
+            kb_id: 知识库 ID
+            doc_id: 文档 ID
+
+        Returns:
+            文档详情，如果不存在则返回 None
+        """
+        if kb_id not in self._knowledge_bases:
+            logger.warning(f"知识库 {kb_id} 不存在")
+            return None
+
+        # 从向量数据库获取文档
+        if self.vector_db:
+            try:
+                # 尝试从向量数据库获取文档
+                result = await self.vector_db.get(doc_id)
+                if result:
+                    return {
+                        "doc_id": doc_id,
+                        "kb_id": kb_id,
+                        "content": result.get("content", ""),
+                        "metadata": result.get("metadata", {}),
+                    }
+            except Exception as e:
+                logger.error(f"从向量数据库获取文档失败: {e}")
+
+        # 如果向量数据库未实现或获取失败，返回模拟数据
+        # 实际应该从文档存储中获取
+        return {
+            "doc_id": doc_id,
+            "kb_id": kb_id,
+            "title": f"文档 {doc_id}",
+            "content": "",
+            "metadata": {},
+            "note": "文档详情功能需要完整的向量数据库支持"
+        }
+
+    async def list_documents(self, kb_id: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """列出知识库中的所有文档
+
+        Args:
+            kb_id: 知识库 ID
+            limit: 返回数量限制
+            offset: 偏移量
+
+        Returns:
+            文档列表
+        """
+        if kb_id not in self._knowledge_bases:
+            logger.warning(f"知识库 {kb_id} 不存在")
+            return []
+
+        # 从向量数据库列出文档
+        if self.vector_db:
+            try:
+                # 尝试从向量数据库列出文档
+                docs = await self.vector_db.list(limit=limit, offset=offset)
+                return docs
+            except Exception as e:
+                logger.error(f"从向量数据库列出文档失败: {e}")
+
+        return []
 
     async def get_document_count(self, kb_id: str) -> int:
         """获取知识库中的文档数量
@@ -178,7 +252,16 @@ class KnowledgeBaseManager:
         """
         if kb_id not in self._knowledge_bases:
             return 0
-        return 0  # 简化实现
+
+        # 从向量数据库获取文档数量
+        if self.vector_db:
+            try:
+                count = await self.vector_db.count()
+                return count
+            except Exception as e:
+                logger.error(f"从向量数据库获取文档数量失败: {e}")
+
+        return 0
 
 
 # 创建全局知识库管理器实例

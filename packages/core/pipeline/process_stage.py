@@ -202,12 +202,12 @@ class ProcessStage(Stage):
     async def _trigger_llm_response(self, event: dict, ctx: PipelineContext) -> None:
         """触发 LLM 回复"""
         try:
-            from packages.llm.context_manager import (
+            from ...llm.context_manager import (
                 LLMContextManager,
                 ContextConfig,
                 ContextCompressionStrategy,
             )
-            from packages.llm.entities import LLMResponse
+            from ...llm.entities import LLMResponse
             from ...agent.tools import ToolRegistry, ToolDefinition, ToolCategory
             from ..config import load_config
 
@@ -313,7 +313,7 @@ class ProcessStage(Stage):
             ))
 
             # 从 prompt_manager 获取工具提示词
-            from packages.core.prompt_manager import prompt_manager
+            from ..prompt_manager import prompt_manager
             
             # 构建工具列表描述
             tools_desc = "=== 可用工具列表 ===\n\n"

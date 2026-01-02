@@ -182,6 +182,64 @@ class DatabaseManager:
                 )
             """)
 
+            # 长期记忆表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS long_term_memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    platform_id TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    memory_type TEXT DEFAULT 'general',
+                    tags TEXT,
+                    importance INTEGER DEFAULT 0,
+                    access_count INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    last_accessed_at TEXT
+                )
+            """)
+
+            # 记忆标签表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS memory_tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tag_name TEXT NOT NULL UNIQUE,
+                    color TEXT DEFAULT '#1976D2',
+                    description TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 记忆与标签关联表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS memory_tag_relations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    memory_id INTEGER NOT NULL,
+                    tag_id INTEGER NOT NULL,
+                    FOREIGN KEY (memory_id) REFERENCES long_term_memories(id) ON DELETE CASCADE,
+                    FOREIGN KEY (tag_id) REFERENCES memory_tags(id) ON DELETE CASCADE,
+                    UNIQUE(memory_id, tag_id)
+                )
+            """)
+
+            # 统计数据缓存表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS stats_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cache_key TEXT NOT NULL UNIQUE,
+                    data TEXT NOT NULL,
+                    cached_at TEXT NOT NULL,
+                    ttl INTEGER NOT NULL DEFAULT 300
+                )
+            """)
+
+            # 创建长期记忆相关索引
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_user ON long_term_memories(user_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_platform ON long_term_memories(platform_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_type ON long_term_memories(memory_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_importance ON long_term_memories(importance DESC)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_memories_updated ON long_term_memories(updated_at DESC)")
+
             conn.commit()
             logger.info("数据库表结构初始化完成")
 
@@ -1512,6 +1570,68 @@ class DatabaseManager:
                 }
                 for row in rows
             ]
+
+    # ========== 统计数据缓存相关操作 ==========
+
+    def get_stats_cache(self, cache_key: str = "default") -> Dict[str, Any]:
+        """获取统计数据缓存
+
+        Args:
+            cache_key: 缓存键，默认为 "default"
+
+        Returns:
+            缓存字典，包含 data, cached_at, ttl 字段，如果不存在则返回空字典
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT data, cached_at, ttl FROM stats_cache WHERE cache_key = ?",
+                (cache_key,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "data": json.loads(row["data"]),
+                    "cached_at": row["cached_at"],
+                    "ttl": row["ttl"],
+                }
+            return {}
+
+    def set_stats_cache(self, data: Dict[str, Any], ttl: int = 300, cache_key: str = "default") -> bool:
+        """设置统计数据缓存
+
+        Args:
+            data: 要缓存的数据
+            ttl: 缓存过期时间（秒）
+            cache_key: 缓存键，默认为 "default"
+
+        Returns:
+            是否设置成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO stats_cache (cache_key, data, cached_at, ttl) VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+                    ON CONFLICT(cache_key) DO UPDATE SET data = ?, cached_at = CURRENT_TIMESTAMP, ttl = ?
+                    """,
+                    (cache_key, json.dumps(data), ttl, json.dumps(data), ttl)
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"设置统计数据缓存失败: {e}")
+            return False
+
+    # 别名方法，用于向后兼容
+    def get_migrations(self) -> List[Dict[str, Any]]:
+        """获取所有迁移记录（别名方法）
+
+        Returns:
+            迁移记录列表
+        """
+        return self.get_all_migrations()
 
 
 # 显式导出的符号

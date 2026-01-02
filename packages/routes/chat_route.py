@@ -71,7 +71,7 @@ class ChatRoute(Route):
         session_id = post_data["session_id"]
         selected_provider = post_data.get("selected_provider")
         selected_model = post_data.get("selected_model")
-        post_data.get("enable_streaming", True)
+        enable_streaming = post_data.get("enable_streaming", True)
 
         # 检查消息是否为空
         if not message:
@@ -106,23 +106,33 @@ class ChatRoute(Route):
         if not provider_config:
             return Response().error("No enabled LLM provider found").to_dict()
 
-        # 模拟流式响应
+        # 流式响应
         async def stream():
             client_disconnected = False
             accumulated_text = ""
 
             try:
                 async with track_conversation(self.running_convs, session_id):
-                    # 模拟 LLM 响应
-                    response_text = await self._simulate_llm_response(
-                        message, provider_config, selected_model
-                    )
+                    # 调用真实的 LLM API
+                    if enable_streaming and hasattr(self, '_stream_llm_response'):
+                        # 尝试使用流式响应
+                        async for chunk in self._stream_llm_response(
+                            message, provider_config, selected_model, session_id
+                        ):
+                            if not client_disconnected:
+                                accumulated_text += chunk
+                                yield f"data: {json.dumps({'type': 'plain', 'text': chunk}, ensure_ascii=False)}\n\n"
+                    else:
+                        # 使用普通响应
+                        response_text = await self._call_llm_response(
+                            message, provider_config, selected_model, session_id
+                        )
 
-                    # 发送流式数据
-                    for chunk in self._chunk_text(response_text):
-                        if not client_disconnected:
-                            accumulated_text += chunk
-                            yield f"data: {json.dumps({'type': 'plain', 'text': chunk}, ensure_ascii=False)}\n\n"
+                        # 发送流式数据
+                        for chunk in self._chunk_text(response_text):
+                            if not client_disconnected:
+                                accumulated_text += chunk
+                                yield f"data: {json.dumps({'type': 'plain', 'text': chunk}, ensure_ascii=False)}\n\n"
 
                     # 发送结束标记
                     if not client_disconnected:
@@ -135,7 +145,7 @@ class ChatRoute(Route):
                 logger.debug(f"[Chat] 用户 {username} 断开聊天连接。")
                 client_disconnected = True
             except Exception as e:
-                logger.error(f"[Chat] 聊天错误: {e}")
+                logger.error(f"[Chat] 聊天错误: {e}", exc_info=True)
                 yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
         response = await make_response(
@@ -150,31 +160,141 @@ class ChatRoute(Route):
         response.timeout = None
         return response
 
-    async def _simulate_llm_response(
-        self, message: str, provider_config: dict, model: str
+    async def _call_llm_response(
+        self, message: str, provider_config: dict, model: str, session_id: str
     ) -> str:
-        """模拟 LLM 响应
+        """调用真实的 LLM API
 
         Args:
             message: 用户消息
             provider_config: 提供商配置
             model: 模型名称
+            session_id: 会话 ID
 
         Returns:
-            模拟的响应文本
+            LLM 响应文本
         """
-        # 这里应该调用实际的 LLM 提供商
-        # 暂时返回模拟响应
+        from ...llm.register import llm_provider_cls_map
+        from ...llm.context_manager import LLMContextManager, ContextConfig, ContextCompressionStrategy
+
         provider_type = provider_config.get("type", "unknown")
         logger.info(
-            f"[Chat] 使用提供商 {provider_type} 模型 {model} 处理消息: {message}"
+            f"[Chat] 使用提供商 {provider_type} 模型 {model} 处理消息: {message[:100]}"
         )
 
-        # 模拟延迟
-        await asyncio.sleep(0.5)
+        # 获取 provider 类
+        provider_meta = llm_provider_cls_map.get(provider_type)
+        if not provider_meta:
+            logger.error(f"未找到 LLM 提供商类型: {provider_type}")
+            return f"错误: 未找到 LLM 提供商类型 {provider_type}"
 
-        # 返回模拟响应
-        return f"这是来自 {provider_type} 的模拟响应。你发送了: {message}"
+        # 创建 provider 实例
+        provider = provider_meta.cls_type(provider_config, {})
+
+        # 如果指定了模型，使用指定的模型
+        if model:
+            provider.set_model(model)
+
+        # 获取会话历史作为上下文
+        sessions = self._load_sessions()
+        contexts = None
+        if session_id in sessions:
+            # 转换会话历史为 LLM 上下文格式
+            contexts = []
+            for msg in sessions[session_id].get("messages", []):
+                contexts.append({
+                    "role": msg.get("role"),
+                    "content": msg.get("content")
+                })
+            # 只保留最近的 N 条消息
+            max_messages = provider_config.get("max_messages", 20)
+            if contexts and len(contexts) > max_messages:
+                contexts = contexts[-max_messages:]
+
+        try:
+            # 调用 LLM API
+            response = await provider.text_chat(
+                prompt=message,
+                session_id=session_id,
+                contexts=contexts,
+            )
+
+            response_text = response.completion_text or response.content
+
+            logger.info(f"[Chat] LLM 响应: {response_text[:100]}")
+            return response_text
+
+        except Exception as e:
+            logger.error(f"[Chat] LLM API 调用失败: {e}", exc_info=True)
+            return f"错误: LLM API 调用失败 - {str(e)}"
+
+    async def _stream_llm_response(
+        self, message: str, provider_config: dict, model: str, session_id: str
+    ):
+        """流式 LLM 响应
+
+        Args:
+            message: 用户消息
+            provider_config: 提供商配置
+            model: 模型名称
+            session_id: 会话 ID
+
+        Yields:
+            响应文本块
+        """
+        from ...llm.register import llm_provider_cls_map
+        from ...llm.context_manager import LLMContextManager, ContextConfig, ContextCompressionStrategy
+
+        provider_type = provider_config.get("type", "unknown")
+
+        # 获取 provider 类
+        provider_meta = llm_provider_cls_map.get(provider_type)
+        if not provider_meta:
+            yield f"错误: 未找到 LLM 提供商类型 {provider_type}"
+            return
+
+        # 创建 provider 实例
+        provider = provider_meta.cls_type(provider_config, {})
+
+        # 如果指定了模型，使用指定的模型
+        if model:
+            provider.set_model(model)
+
+        # 检查是否支持流式响应
+        if not hasattr(provider, 'text_chat_stream'):
+            # 不支持流式，回退到普通响应
+            response_text = await self._call_llm_response(message, provider_config, model, session_id)
+            for chunk in self._chunk_text(response_text):
+                yield chunk
+            return
+
+        # 获取会话历史作为上下文
+        sessions = self._load_sessions()
+        contexts = None
+        if session_id in sessions:
+            contexts = []
+            for msg in sessions[session_id].get("messages", []):
+                contexts.append({
+                    "role": msg.get("role"),
+                    "content": msg.get("content")
+                })
+            max_messages = provider_config.get("max_messages", 20)
+            if contexts and len(contexts) > max_messages:
+                contexts = contexts[-max_messages:]
+
+        try:
+            # 调用流式 LLM API
+            async for chunk in provider.text_chat_stream(
+                prompt=message,
+                session_id=session_id,
+                contexts=contexts,
+            ):
+                if chunk and chunk.completion_text:
+                    yield chunk.completion_text
+
+        except Exception as e:
+            logger.error(f"[Chat] LLM 流式 API 调用失败: {e}", exc_info=True)
+            yield f"错误: LLM API 调用失败 - {str(e)}"
 
     def _chunk_text(self, text: str, chunk_size: int = 10) -> list[str]:
         """将文本分块

@@ -1,0 +1,117 @@
+================================================================================
+NekoBot 项目导入检查报告
+================================================================================
+
+## 统计信息
+  总导入语句: 65
+  项目内部导入: 21
+  外部库导入: 44
+  缺失的导入: 21
+
+## 发现的问题
+
+### 错误
+  [test_hot_reload.py:16] from packages.core.hot_reload_manager import HotReloadManager
+  [test_hot_reload.py:16] from packages.core.hot_reload_manager import ReloadEventType
+  [test_hot_reload.py:16] from packages.core.hot_reload_manager import ReloadEvent
+  [test_hot_reload.py:21] from packages.core.config_reload_manager import ConfigReloadManager
+  [test_hot_reload.py:21] from packages.core.config_reload_manager import ConfigSchema
+  [test_hot_reload.py:21] from packages.core.config_reload_manager import ConfigValidationResult
+  [test_hot_reload.py:26] from packages.routes.dynamic_route_manager import DynamicRouteManager
+  [test_hot_reload.py:26] from packages.routes.dynamic_route_manager import RouteInfo
+  [test_hot_reload.py:26] from packages.routes.dynamic_route_manager import RouteConflictResolution
+  [test_llm_providers.py:9] from packages.llm import LLMResponse
+  [test_llm_providers.py:9] from packages.llm import TokenUsage
+  [test_llm_providers.py:13] from packages.llm.sources import claude_provider
+  [test_llm_providers.py:13] from packages.llm.sources import deepseek_provider
+  [test_llm_providers.py:13] from packages.llm.sources import dashscope_provider
+  [test_llm_providers.py:13] from packages.llm.sources import moonshot_provider
+  [test_llm_providers.py:13] from packages.llm.sources import zhipu_provider
+  [test_platform_adapters.py:9] from packages.platform import BasePlatform
+  [test_platform_adapters.py:10] from packages.platform.base import PlatformStatus
+  [test_platform_adapters.py:11] from packages.platform.sources import lark
+  [test_platform_adapters.py:11] from packages.platform.sources import kook
+  [test_platform_adapters.py:11] from packages.platform.sources import qqchannel
+
+## 导入概览（按文件）
+
+### check_imports.py
+  Line 5: from sys import sys
+  Line 6: from os import os
+  Line 7: from pathlib import Path
+  Line 19: from import_checker import import_checker
+
+### import_checker.py
+  Line 5: from ast import ast
+  Line 6: from os import os
+  Line 7: from sys import sys
+  Line 8: from pathlib import Path
+  Line 9: from typing import Dict
+  Line 9: from typing import List
+  Line 9: from typing import Set
+  Line 9: from typing import Tuple
+  Line 9: from typing import Any
+  Line 10: from dataclasses import dataclass
+  Line 10: from dataclasses import field
+  Line 11: from datetime import datetime
+
+### outputs\import_checker_report.py
+  Line 5: from ast import ast
+  Line 6: from os import os
+  Line 7: from sys import sys
+  Line 8: from pathlib import Path
+  Line 9: from typing import Dict
+  Line 9: from typing import List
+  Line 9: from typing import Set
+  Line 9: from typing import Tuple
+
+### run_checker.py
+  Line 5: from sys import sys
+  Line 6: from os import os
+  Line 7: from shutil import shutil
+  Line 8: from pathlib import Path
+
+### test_hot_reload.py
+  Line 6: from pytest import pytest
+  Line 7: from asyncio import asyncio
+  Line 8: from json import json
+  Line 9: from tempfile import tempfile
+  Line 10: from pathlib import Path
+  Line 11: from unittest.mock import Mock
+  Line 11: from unittest.mock import AsyncMock
+  Line 11: from unittest.mock import patch
+  Line 13: from sys import sys
+  Line 16: from packages.core.hot_reload_manager import HotReloadManager
+  Line 16: from packages.core.hot_reload_manager import ReloadEventType
+  Line 16: from packages.core.hot_reload_manager import ReloadEvent
+  Line 21: from packages.core.config_reload_manager import ConfigReloadManager
+  Line 21: from packages.core.config_reload_manager import ConfigSchema
+  Line 21: from packages.core.config_reload_manager import ConfigValidationResult
+  Line 26: from packages.routes.dynamic_route_manager import DynamicRouteManager
+  Line 26: from packages.routes.dynamic_route_manager import RouteInfo
+  Line 26: from packages.routes.dynamic_route_manager import RouteConflictResolution
+  Line 705: from time import time
+  Line 731: from time import time
+
+### test_llm_providers.py
+  Line 6: from pytest import pytest
+  Line 7: from unittest.mock import MagicMock
+  Line 7: from unittest.mock import patch
+  Line 9: from packages.llm import LLMResponse
+  Line 9: from packages.llm import TokenUsage
+  Line 13: from packages.llm.sources import claude_provider
+  Line 13: from packages.llm.sources import deepseek_provider
+  Line 13: from packages.llm.sources import dashscope_provider
+  Line 13: from packages.llm.sources import moonshot_provider
+  Line 13: from packages.llm.sources import zhipu_provider
+
+### test_platform_adapters.py
+  Line 6: from asyncio import asyncio
+  Line 7: from pytest import pytest
+  Line 9: from packages.platform import BasePlatform
+  Line 10: from packages.platform.base import PlatformStatus
+  Line 11: from packages.platform.sources import lark
+  Line 11: from packages.platform.sources import kook
+  Line 11: from packages.platform.sources import qqchannel
+
+================================================================================

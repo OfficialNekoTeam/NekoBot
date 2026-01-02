@@ -42,6 +42,120 @@ class StatRoute(Route):
         except Exception:
             return False
 
+    async def _get_user_activity_stats(
+        self, db_manager, start_dt: datetime, end_dt: datetime
+    ) -> Dict[str, Any]:
+        """从数据库获取用户活跃度统计
+
+        Args:
+            db_manager: 数据库管理器
+            start_dt: 开始时间
+            end_dt: 结束时间
+
+        Returns:
+            用户活跃度统计数据
+        """
+        try:
+            # 获取操作日志统计
+            logs = db_manager.get_operation_logs(limit=10000)
+
+            # 统计活跃用户
+            active_users = set()
+            daily_active = set()
+            weekly_active = set()
+            monthly_active = set()
+
+            now = datetime.utcnow()
+            one_day_ago = now - timedelta(days=1)
+            one_week_ago = now - timedelta(weeks=1)
+            one_month_ago = now - timedelta(days=30)
+
+            for log in logs:
+                username = log.get("username")
+                if not username:
+                    continue
+
+                timestamp_str = log.get("timestamp", "")
+                if timestamp_str:
+                    try:
+                        timestamp = datetime.fromisoformat(timestamp_str)
+                        if start_dt <= timestamp <= end_dt:
+                            active_users.add(username)
+
+                        # 统计不同时间段的活跃用户
+                        if timestamp >= one_day_ago:
+                            daily_active.add(username)
+                        if timestamp >= one_week_ago:
+                            weekly_active.add(username)
+                        if timestamp >= one_month_ago:
+                            monthly_active.add(username)
+                    except ValueError:
+                        pass
+
+            # 获取总用户数
+            all_users = db_manager.get_all_users()
+            total_users = len(all_users)
+
+            return {
+                "total_users": total_users,
+                "active_users": len(active_users),
+                "new_users": 0,  # 可以从注册时间统计
+                "daily_active": len(daily_active),
+                "weekly_active": len(weekly_active),
+                "monthly_active": len(monthly_active),
+            }
+        except Exception as e:
+            logger.error(f"获取用户活跃度统计失败: {e}")
+            return {
+                "total_users": 0,
+                "active_users": 0,
+                "new_users": 0,
+                "daily_active": 0,
+                "weekly_active": 0,
+                "monthly_active": 0,
+            }
+
+    async def _get_resource_usage(self) -> Dict[str, Any]:
+        """获取系统资源使用率
+
+        Returns:
+            资源使用率数据
+        """
+        resource_usage = {
+            "cpu_usage": 0.0,
+            "memory_usage": 0.0,
+            "disk_usage": 0.0,
+        }
+
+        # 尝试使用 psutil 获取真实数据
+        try:
+            import psutil
+
+            resource_usage["cpu_usage"] = round(psutil.cpu_percent(interval=0.1), 1)
+            memory = psutil.virtual_memory()
+            resource_usage["memory_usage"] = round(memory.percent, 1)
+
+            # 获取主要磁盘的使用率
+            try:
+                disk = psutil.disk_usage("/")
+                resource_usage["disk_usage"] = round(
+                    (disk.used / disk.total) * 100, 1
+                )
+            except Exception:
+                pass
+
+            return resource_usage
+        except ImportError:
+            logger.warning("psutil 未安装，使用模拟数据")
+            return {
+                "cpu_usage": 25.5,
+                "memory_usage": 45.2,
+                "disk_usage": 60.8,
+            }
+        except Exception as e:
+            logger.error(f"获取系统资源使用率失败: {e}")
+            return resource_usage
+
     def _parse_date_range(
         self, start_date: Optional[str], end_date: Optional[str]
     ) -> tuple[datetime, datetime]:
@@ -130,40 +244,11 @@ class StatRoute(Route):
                         }
                     )
 
-            # 计算用户活跃度（模拟数据）
-            user_activity = {
-                "active_users": 0,
-                "new_users": 0,
-                "daily_active": 0,
-                "weekly_active": 0,
-                "monthly_active": 0,
-            }
+            # 计算用户活跃度（从数据库获取真实数据）
+            user_activity = await self._get_user_activity_stats(db_manager, start_dt, end_dt)
 
-            # 计算资源使用率（模拟数据）
-            resource_usage = {
-                "cpu_usage": 0.0,
-                "memory_usage": 0.0,
-                "disk_usage": 0.0,
-            }
-
-            # 尝试获取真实的系统资源使用率
-            try:
-                import psutil
-
-                resource_usage["cpu_usage"] = round(psutil.cpu_percent(interval=0.1), 1)
-                memory = psutil.virtual_memory()
-                resource_usage["memory_usage"] = round(memory.percent, 1)
-                disk = psutil.disk_usage("/")
-                resource_usage["disk_usage"] = round(
-                    (disk.used / disk.total) * 100, 1
-                )
-            except ImportError:
-                logger.warning("psutil未安装，使用模拟数据")
-                resource_usage = {
-                    "cpu_usage": 25.5,
-                    "memory_usage": 45.2,
-                    "disk_usage": 60.8,
-                }
+            # 计算资源使用率（尝试使用 psutil 获取真实数据）
+            resource_usage = await self._get_resource_usage()
 
             # 构建统计数据
             stats_data = {

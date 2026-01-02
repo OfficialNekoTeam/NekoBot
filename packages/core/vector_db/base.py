@@ -14,11 +14,11 @@ class DocumentChunk:
 
     表示向量化后的文档片段
     """
-    id: Optional[str] = None
-    """文档 ID"""
-
     text: str
     """文档文本内容"""
+
+    id: Optional[str] = None
+    """文档 ID"""
 
     embedding: Optional[List[float]] = None
     """向量嵌入（可选）"""
@@ -50,14 +50,14 @@ class SearchResult:
 
     表示向量搜索的结果
     """
-    document_id: Optional[str] = None
-    """文档 ID"""
-
     text: str
     """文档文本"""
 
     score: float
     """相似度分数"""
+
+    document_id: Optional[str] = None
+    """文档 ID"""
 
     metadata: Dict[str, Any] = None
     """文档元数据"""

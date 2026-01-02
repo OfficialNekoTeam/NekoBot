@@ -64,6 +64,7 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 desktop.ini
+nul
 
 # ============================================
 # 环境变量和配置

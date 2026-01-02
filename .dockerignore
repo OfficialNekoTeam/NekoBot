@@ -1,2 +1,66 @@
-# Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio and WebStorm
-# Reference: https://intellij-support.jetbrains.com/hc/en-us/articles/206544839
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+ENV/
+*.pyc
+*.pyo
+
+# Git
+.git/
+.gitignore
+.github/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+Dockerfile
+docker-compose.yaml
+compose.yaml
+.dockerignore
+
+# Documentation
+README.md
+LICENSE
+docs/
+
+# Tests
+tests/
+pytest.ini
+.coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Data (will be mounted as volume)
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# CI/CD
+.gitlab-ci.yml
+.travis.yml
+azure-pipelines.yml
+
+# Other
+*.log
+*.tmp
+*.bak
+.python-version
+clean_pycache.py

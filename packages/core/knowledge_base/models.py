@@ -24,11 +24,11 @@ class KnowledgeBase:
     description: str
     """知识库描述"""
 
-    embedding_model: str = "openai"
-    """嵌入模型名称"""
-
     created_at: datetime
     """创建时间"""
+
+    embedding_model: str = "openai"
+    """嵌入模型名称"""
 
     document_count: int = 0
     """文档数量"""
@@ -55,11 +55,14 @@ class Document:
     kb_id: str
     """所属知识库 ID"""
 
-    title: str = ""
-    """文档标题"""
-
     content: str
     """文档内容"""
+
+    created_at: datetime
+    """创建时间"""
+
+    title: str = ""
+    """文档标题"""
 
     source: str = "manual"
     """文档来源（manual/manual/upload/等）"""
@@ -69,9 +72,6 @@ class Document:
 
     chunk_count: int = 1
     """分块数量"""
-
-    created_at: datetime
-    """创建时间"""
 
     updated_at: Optional[datetime] = None
     """更新时间"""

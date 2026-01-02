@@ -3,7 +3,7 @@
 按段落和标题智能分块
 """
 
-from ..base import BaseChunker
+from .base import BaseChunker
 from typing import List
 
 

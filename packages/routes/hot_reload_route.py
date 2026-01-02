@@ -13,26 +13,22 @@ class HotReloadRoute(Route):
     def register_routes(self) -> None:
         """注册所有路由"""
         self.routes = [
-            ("GET", "/api/hot_reload/stats", self.get_stats),
-            ("GET", "/api/hot_reload/history", self.get_history),
-            ("GET", "/api/hot_reload/routes", self.get_routes),
-            ("POST", "/api/hot_reload/reload_plugin", self.reload_plugin),
-            ("POST", "/api/hot_reload/reload_config", self.reload_config),
-            ("POST", "/api/hot_reload/register_route", self.register_route),
-            ("POST", "/api/hot_reload/unregister_route", self.unregister_route),
-            ("POST", "/api/hot_reload/enable_route", self.enable_route),
-            ("POST", "/api/hot_reload/disable_route", self.disable_route),
-            ("POST", "/api/hot_reload/start", self.start_hot_reload),
-            ("POST", "/api/hot_reload/stop", self.stop_hot_reload),
-            ("GET", "/api/hot_reload/routes_doc", self.get_routes_documentation),
+            ("/api/hot_reload/stats", "GET", self.hot_get_stats),
+            ("/api/hot_reload/history", "GET", self.hot_get_history),
+            ("/api/hot_reload/routes", "GET", self.hot_get_routes),
+            ("/api/hot_reload/reload_plugin", "POST", self.hot_reload_plugin),
+            ("/api/hot_reload/reload_config", "POST", self.hot_reload_config),
+            ("/api/hot_reload/register_route", "POST", self.hot_register_route),
+            ("/api/hot_reload/unregister_route", "POST", self.hot_unregister_route),
+            ("/api/hot_reload/enable_route", "POST", self.hot_enable_route),
+            ("/api/hot_reload/disable_route", "POST", self.hot_disable_route),
+            ("/api/hot_reload/start", "POST", self.start_hot_reload),
+            ("/api/hot_reload/stop", "POST", self.stop_hot_reload),
+            ("/api/hot_reload/routes_doc", "GET", self.get_routes_documentation),
         ]
-        
-        for method, path, handler in self.routes:
-            self.app.route(path, methods=[method])(handler)
-        
         logger.info("热重载管理路由已注册")
 
-    async def get_stats(self):
+    async def hot_get_stats(self):
         """获取热重载统计信息"""
         try:
             # 获取热重载管理器
@@ -51,7 +47,7 @@ class HotReloadRoute(Route):
             logger.error(f"获取热重载统计失败: {e}")
             return Response().error(f"获取统计信息失败: {str(e)}").to_dict()
 
-    async def get_history(self):
+    async def hot_get_history(self):
         """获取重载历史"""
         try:
             limit = request.args.get("limit", 50, type=int)
@@ -71,7 +67,7 @@ class HotReloadRoute(Route):
             logger.error(f"获取重载历史失败: {e}")
             return Response().error(f"获取历史记录失败: {str(e)}").to_dict()
 
-    async def get_routes(self):
+    async def hot_get_routes(self):
         """获取动态路由列表"""
         try:
             dynamic_route_manager = self.context.app.plugins.get("dynamic_route_manager")
@@ -85,7 +81,7 @@ class HotReloadRoute(Route):
             logger.error(f"获取动态路由列表失败: {e}")
             return Response().error(f"获取路由列表失败: {str(e)}").to_dict()
 
-    async def reload_plugin(self):
+    async def hot_reload_plugin(self):
         """重载指定插件"""
         try:
             data = await self.get_request_data()
@@ -114,7 +110,7 @@ class HotReloadRoute(Route):
             logger.error(traceback.format_exc())
             return Response().error(f"重载插件失败: {str(e)}").to_dict()
 
-    async def reload_config(self):
+    async def hot_reload_config(self):
         """重载指定配置"""
         try:
             data = await self.get_request_data()
@@ -143,7 +139,7 @@ class HotReloadRoute(Route):
             logger.error(traceback.format_exc())
             return Response().error(f"重载配置失败: {str(e)}").to_dict()
 
-    async def register_route(self):
+    async def hot_register_route(self):
         """注册动态路由"""
         try:
             data = await self.get_request_data()
@@ -171,7 +167,7 @@ class HotReloadRoute(Route):
             logger.error(traceback.format_exc())
             return Response().error(f"注册路由失败: {str(e)}").to_dict()
 
-    async def unregister_route(self):
+    async def hot_unregister_route(self):
         """注销动态路由"""
         try:
             data = await self.get_request_data()
@@ -198,7 +194,7 @@ class HotReloadRoute(Route):
             logger.error(traceback.format_exc())
             return Response().error(f"注销路由失败: {str(e)}").to_dict()
 
-    async def enable_route(self):
+    async def hot_enable_route(self):
         """启用路由"""
         try:
             data = await self.get_request_data()
@@ -223,7 +219,7 @@ class HotReloadRoute(Route):
             logger.error(f"启用路由失败: {e}")
             return Response().error(f"启用路由失败: {str(e)}").to_dict()
 
-    async def disable_route(self):
+    async def hot_disable_route(self):
         """禁用路由"""
         try:
             data = await self.get_request_data()

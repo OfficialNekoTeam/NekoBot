@@ -3,7 +3,7 @@
 按固定大小将文档分块
 """
 
-from ..base import BaseChunker
+from .base import BaseChunker
 from typing import List
 
 

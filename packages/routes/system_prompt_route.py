@@ -7,8 +7,8 @@ from typing import Dict, Any
 from loguru import logger
 
 from .route import Route, Response, RouteContext
-from packages.core.database import db_manager
-from packages.core.prompt_manager import prompt_manager
+from ..core.database import db_manager
+from ..core.prompt_manager import prompt_manager
 
 
 class SystemPromptRoute(Route):

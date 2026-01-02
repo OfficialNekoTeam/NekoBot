@@ -101,15 +101,9 @@ class DynamicRegisterManager:
                     logger.debug(f"动态导入LLM提供商模块: {module_name}")
                     module = importlib.import_module(module_name)
                     
-                    # 直接从模块中获取提供商类（假设类名是ProviderType+Provider）
-                    class_name = provider_type.capitalize() + "Provider"
-                    if class_name not in module.__dict__:
-                        # 尝试其他命名方式
-                        class_name = provider_type.replace("_", "").capitalize() + "Provider"
-                    
-                    if class_name in module.__dict__:
-                        provider_cls = module.__dict__[class_name]
-                        registered_providers[provider_type] = provider_cls
+                    # 直接从模块中获取提供商类
+                    if module_name in module.__dict__:
+                        registered_providers[provider_type] = module
                         logger.info(f"成功注册LLM提供商: {provider_type}")
                     else:
                         # 遍历模块中的所有类，找到继承自BaseLLMProvider的类
@@ -124,7 +118,6 @@ class DynamicRegisterManager:
                         
                         if not found:
                             logger.warning(f"未找到LLM提供商类: {provider_type}")
-                        
                 except Exception as e:
                     logger.error(f"动态注册LLM提供商 {provider_type} 失败: {e}")
         
@@ -177,7 +170,7 @@ class DynamicRegisterManager:
                         logger.info(f"成功注册平台适配器: {adapter_type}")
                     else:
                         # 遍历模块中的所有类，找到继承自BasePlatform的类
-                        from packages.platform.base import BasePlatform
+                        from ..platform.base import BasePlatform
                         found = False
                         for name, cls in module.__dict__.items():
                             if isinstance(cls, type) and issubclass(cls, BasePlatform) and cls != BasePlatform:
@@ -193,7 +186,7 @@ class DynamicRegisterManager:
                     logger.error(f"动态注册平台适配器 {adapter_type} 失败: {e}")
         
         # 更新全局变量
-        from packages.platform.register import platform_cls_map
+        from ..platform.register import platform_cls_map
         platform_cls_map.clear()
         platform_cls_map.update(registered_adapters)
         
@@ -231,13 +224,68 @@ class DynamicRegisterManager:
         """
         return self.llm_providers
     
-    def get_all_platform_adapters(self) -> Dict[str, Type]:
-        """获取所有注册的平台适配器
+    async def dynamic_register_platform_adapters_async(self) -> Dict[str, Type]:
+        """异步动态注册平台适配器
         
         Returns:
-            Dict[str, Type]: 所有注册的平台适配器
+            Dict[str, Type]: 注册的平台适配器字典
         """
-        return self.platform_adapters
+        logger.info("开始异步动态注册平台适配器...")
+        
+        # 加载配置
+        _, platforms_config = self.load_configs()
+        
+        # 动态注册启用的平台适配器
+        registered_adapters = {}
+        
+        for adapter_id, adapter_config in platforms_config.items():
+            if adapter_config.get("enable", False):
+                adapter_type = adapter_config.get("type", adapter_id)
+                
+                try:
+                    # 动态导入模块
+                    module_name = self.platform_adapter_module_map.get(adapter_type)
+                    if not module_name:
+                        logger.warning(f"未找到平台适配器 {adapter_type} 的模块映射，跳过注册")
+                        continue
+                    
+                    logger.debug(f"动态导入平台适配器模块: {module_name}")
+                    module = importlib.import_module(module_name)
+                    
+                    # 直接从模块中获取适配器类
+                    class_name = adapter_type.capitalize() + "Platform"
+                    
+                    if class_name in module.__dict__:
+                        adapter_cls = module.__dict__[class_name]
+                        registered_adapters[adapter_type] = adapter_cls
+                        logger.info(f"成功注册平台适配器: {adapter_type}，使用类: {class_name}")
+                    else:
+                        # 遍历模块中的所有类，找到继承自BasePlatform的类
+                        from ..platform.base import BasePlatform
+                        found = False
+                        for name, cls in module.__dict__.items():
+                            if isinstance(cls, type) and issubclass(cls, BasePlatform):
+                                registered_adapters[adapter_type] = cls
+                                logger.info(f"成功注册平台适配器: {adapter_type}，使用类: {name}")
+                                found = True
+                                break
+                        
+                        if not found:
+                            logger.warning(f"未找到平台适配器类: {adapter_type}")
+                            
+                except Exception as e:
+                    logger.error(f"动态注册平台适配器 {adapter_type} 失败: {e}")
+        
+        # 更新全局变量
+        from ..platform.register import platform_cls_map
+        platform_cls_map.clear()
+        platform_cls_map.update(registered_adapters)
+        
+        # 保持向后兼容，同步更新属性
+        self.platform_adapters = registered_adapters
+        
+        logger.info(f"平台适配器异步动态注册完成，共注册 {len(registered_adapters)} 个适配器")
+        return registered_adapters
 
 
 # 创建全局动态注册管理器实例

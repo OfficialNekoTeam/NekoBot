@@ -1,5 +1,6 @@
 """NekoBot Quart 应用"""
 
+from pathlib import Path
 from quart import Quart, websocket, send_from_directory, request, g
 from quart_cors import cors
 from werkzeug.exceptions import Unauthorized
@@ -34,7 +35,9 @@ app = cors(
 )
 
 # 获取项目根目录
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+# 从当前文件位置计算项目根目录
+CURRENT_FILE = os.path.abspath(__file__)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_FILE))
 
 # 静态文件目录
 STATIC_DIR = os.path.join(PROJECT_ROOT, "data", "dist")
@@ -57,15 +60,21 @@ from .core.server import (
 # 导入动态注册管理器
 from .llm.dynamic_register import dynamic_register_manager
 
+# 导入新架构组件
+from .conversation import ConversationManager
+from .config import config as config_manager
+from .agent import AgentExecutor
+from .pipeline import PipelineScheduler, PipelineContext
+
 # 导入热重载相关模块
 from .core.hot_reload_manager import HotReloadManager
 from .core.config_reload_manager import config_reload_manager
 from .routes.dynamic_route_manager import DynamicRouteManager
 
-# 动态注册LLM提供商和平台适配器
+# 动态注册LLM提供商和平台适配器（保持同步）
 logger.info("开始动态注册组件...")
-dynamic_register_manager.dynamic_register_llm_providers()
-dynamic_register_manager.dynamic_register_platform_adapters()
+llm_providers = dynamic_register_manager.dynamic_register_llm_providers()
+platform_adapters = dynamic_register_manager.dynamic_register_platform_adapters()
 logger.info("动态注册组件完成")
 
 # 导入路由模块
@@ -87,12 +96,25 @@ from .routes.system_route import SystemRoute
 from .routes.tool_prompt_route import ToolPromptRoute
 from .routes.system_prompt_route import SystemPromptRoute
 from .routes.hot_reload_route import HotReloadRoute
+from .routes.config_profile_route import ConfigProfileRoute
+from .routes.backup_route import BackupRoute
+from .routes.knowledge_base_route import KnowledgeBaseRoute
+from .routes.long_term_memory_route import LongTermMemoryRoute
+# 新架构组件路由
+from .routes.agent_route import AgentRoute
+from .routes.pipeline_route import PipelineRoute
+from .routes.tool_route import ToolRoute
+from .routes.conversation_route import ConversationRoute
 
 # 初始化应用状态
 app.plugins = {
     "plugin_manager": plugin_manager,
     "platform_manager": platform_manager,
     "event_queue": event_queue,
+    # 新架构组件
+    "conversation_manager": ConversationManager(),
+    "config_manager": config_manager,
+    "agent_executor": AgentExecutor(),
 }
 
 # 初始化热重载管理器
@@ -107,6 +129,20 @@ app.plugins["hot_reload_manager"] = hot_reload_manager
 # 初始化动态路由管理器
 dynamic_route_manager = DynamicRouteManager(app)
 app.plugins["dynamic_route_manager"] = dynamic_route_manager
+
+# 初始化 Pipeline 调度器
+pipeline_context = PipelineContext(
+    agent_executor=app.plugins["agent_executor"],
+    platform_manager=platform_manager,
+    plugin_manager=plugin_manager,
+    conversation_manager=app.plugins["conversation_manager"],
+    config_manager=config_manager,
+    event_bus=event_queue,  # event_queue 作为事件总线
+    metadata={},
+)
+# 初始化空的 Pipeline 调度器（stages 可以通过 register_stage 动态注册）
+pipeline_scheduler = PipelineScheduler(pipeline_context, stages=[])
+app.plugins["pipeline_scheduler"] = pipeline_scheduler
 
 # 创建路由上下文
 route_context = RouteContext(CONFIG, app)
@@ -132,6 +168,18 @@ system_prompt_route = SystemPromptRoute(route_context)
 # 初始化热重载路由
 hot_reload_route = HotReloadRoute(route_context)
 
+# 初始化新添加的路由
+config_profile_route = ConfigProfileRoute(route_context)
+backup_route = BackupRoute(route_context)
+knowledge_base_route = KnowledgeBaseRoute(route_context)
+long_term_memory_route = LongTermMemoryRoute(route_context)
+
+# 初始化新架构组件路由
+agent_route = AgentRoute(route_context)
+pipeline_route = PipelineRoute(route_context)
+tool_route = ToolRoute(route_context)
+conversation_route = ConversationRoute(route_context)
+
 # 注册所有路由
 for route_class in [
     bot_config_route,
@@ -151,9 +199,19 @@ for route_class in [
     tool_prompt_route,
     system_prompt_route,
     hot_reload_route,
+    config_profile_route,
+    backup_route,
+    knowledge_base_route,
+    long_term_memory_route,
+    # 新架构组件路由
+    agent_route,
+    pipeline_route,
+    tool_route,
+    conversation_route,
 ]:
     for path, method, handler in route_class.routes:
-        app.add_url_rule(path, view_func=handler, methods=[method])
+        endpoint = getattr(handler.__func__, 'endpoint_name', handler.__name__)
+        app.add_url_rule(path, endpoint=endpoint, view_func=handler, methods=[method])
 
 
 # JWT认证中间件
@@ -190,6 +248,15 @@ async def before_request():
         "/api/system/info",
         "/api/stat/get",
     ]
+
+    # 新增的 API 路径（不需要认证）
+    new_excluded_paths = [
+        "/api/backups/<backup_id>/download",
+        "/api/config/abconfs",
+        "/api/config/abconf",
+        "/api/config/active",
+    ]
+    excluded_paths.extend(new_excluded_paths)
 
     # 检查 WebUI API 是否禁用
     webui_api_disabled = not CONFIG.get("webui_api_enabled", True)
@@ -496,7 +563,16 @@ async def run_app():
     """启动 Quart 应用"""
     # 启动核心服务器
     await start_core_server()
-    
+
+    # 加载配置管理器数据
+    await config_manager.load()
+    logger.info("配置管理器已加载")
+
+    # 加载会话管理器数据
+    conversation_manager: ConversationManager = app.plugins["conversation_manager"]
+    await conversation_manager.load()
+    logger.info("会话管理器已加载")
+
     # 启动插件热重载（如果启用）
     hot_reload_enabled = CONFIG.get("hot_reload_enabled", False)
     if hot_reload_enabled:
@@ -504,10 +580,10 @@ async def run_app():
         logger.info("插件热重载已启动")
     else:
         logger.info("插件热重载未启用，可通过配置启用")
-    
+
     # 加载初始插件
     await plugin_manager.load_plugins()
-    
+
     # 自动启用所有插件
     for plugin_name in list(plugin_manager.plugins.keys()):
         await plugin_manager.enable_plugin(plugin_name)
