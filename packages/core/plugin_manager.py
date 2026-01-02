@@ -3,10 +3,15 @@
 import os
 import re
 import sys
+import json
+import asyncio
+import tempfile
+import subprocess
 import importlib
 import shutil
 import zipfile
 import aiohttp
+import yaml
 import importlib.util
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Type
@@ -14,6 +19,22 @@ from loguru import logger
 from ..plugins.base import BasePlugin, create_plugin_decorator
 from ..plugins.plugin_data_manager import PluginDataManager
 from .hot_reload_manager import HotReloadManager
+
+
+# GitHub 代理列表
+GITHUB_PROXIES = [
+    "https://ghproxy.com",
+    "https://edgeone.gh-proxy.com",
+    "https://hk.gh-proxy.com",
+    "https://gh.llkk.cc",
+]
+
+# Pip 镜像源列表
+PIP_MIRRORS = [
+    "https://pypi.tuna.tsinghua.edu.cn/simple",
+    "https://pypi.mirrors.ustc.edu.cn/simple",
+    "https://pypi.mirrors.aliyun.com/simple",
+]
 
 
 class PluginManager:
@@ -484,12 +505,517 @@ class PluginManager:
             return ""
 
     async def install_plugin_from_url(
-        self, url: str, proxy: Optional[str] = None
+        self, url: str, proxy: Optional[str] = None, use_github_proxy: Optional[bool] = False,
+        pip_mirror: Optional[str] = None
     ) -> Dict[str, Any]:
-        """从 URL 安装插件"""
-        # 这里可以添加从 URL 安装插件的功能
-        # 暂时返回未实现
-        return {"success": False, "message": "从 URL 安装插件功能暂未实现"}
+        """从 URL 安装插件（参考 AstrBot 实现）
+
+        支持的 URL 格式:
+            1. GitHub 仓库: https://github.com/user/repo
+            2. GitHub 分支: https://github.com/user/repo/tree/branch
+            3. GitHub Release: https://github.com/user/repo/releases/tag/v1.0.0
+            4. GitHub Archive: https://github.com/user/repo/archive/refs/heads/main.zip
+            5. Gitee 仓库: https://gitee.com/user/repo
+            6. 直接 ZIP 链接: https://example.com/plugin.zip
+            7. CDN 链接: https://cdn.example.com/files/plugin.zip
+
+        Args:
+            url: 插件 URL（支持 GitHub 仓库、直链 ZIP）
+            proxy: 代理设置（可选）
+            use_github_proxy: 是否使用 GitHub 代理（仅当 GitHub URL 时生效）
+            pip_mirror: pip 镜像源（可选）
+
+        Returns:
+            安装结果
+        """
+        try:
+            download_url = url
+            is_github = False
+            url_type = "未知"
+
+            # 检查 URL 类型
+            if "github.com" in url.lower():
+                is_github = True
+                # 检查是否已经是 ZIP 链接
+                if url.endswith(".zip"):
+                    url_type = "GitHub ZIP 直链"
+                    download_url = url
+                else:
+                    # 尝试解析 GitHub 仓库链接
+                    try:
+                        author, repo, branch = self.parse_github_url(url)
+                        url_type = f"GitHub 仓库: {author}/{repo}"
+                        logger.info(f"检测到 GitHub 仓库: {author}/{repo}, 分支: {branch or '默认'}")
+
+                        # 尝试获取 GitHub Releases
+                        if not branch:
+                            try:
+                                releases_api = f"https://api.github.com/repos/{author}/{repo}/releases"
+                                releases = await self._fetch_github_releases(releases_api)
+                                if releases:
+                                    download_url = releases[0]["zipball_url"]
+                                    logger.info(f"使用 GitHub Release: {releases[0]['tag_name']}")
+                                else:
+                                    # 没有 Releases，使用默认分支
+                                    download_url = f"https://github.com/{author}/{repo}/archive/refs/heads/main.zip"
+                                    logger.info("未找到 Release，使用默认分支")
+                            except Exception as e:
+                                logger.warning(f"获取 GitHub Releases 失败: {e}，使用默认分支")
+                                download_url = f"https://github.com/{author}/{repo}/archive/refs/heads/main.zip"
+                        else:
+                            # 指定了分支
+                            download_url = f"https://github.com/{author}/{repo}/archive/refs/heads/{branch}.zip"
+                    except ValueError:
+                        # 无法解析，直接使用原 URL
+                        url_type = "GitHub URL（直链）"
+                        download_url = url
+
+            elif "gitee.com" in url.lower():
+                url_type = "Gitee 仓库"
+                # Gitee 不自动处理，直接使用原 URL
+                download_url = url
+
+            elif url.endswith(".zip"):
+                url_type = "ZIP 直链"
+                download_url = url
+
+            else:
+                url_type = "其他 URL"
+                download_url = url
+
+            logger.info(f"URL 类型: {url_type}, 下载地址: {download_url}")
+
+            # 下载插件
+            temp_dir = Path(tempfile.gettempdir()) / "nekobot_plugins"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            zip_path = temp_dir / f"plugin_{asyncio.get_event_loop().time():.0f}.zip"
+
+            success = False
+
+            # 1. 优先使用用户指定的代理
+            if proxy:
+                logger.info(f"使用用户指定的代理: {proxy}")
+                proxy = proxy.rstrip("/")
+                if is_github:
+                    # GitHub URL 使用代理前缀
+                    proxied_url = f"{proxy}/{download_url}"
+                    success = await self._download_file(proxied_url, zip_path, timeout=60)
+                else:
+                    # 非 GitHub URL，使用标准代理
+                    success = await self._download_file(download_url, zip_path, proxy=proxy, timeout=60)
+
+            # 2. 如果用户启用了 GitHub 代理且未指定代理（仅对 GitHub URL 有效）
+            elif is_github and use_github_proxy:
+                logger.info("使用 GitHub 代理下载")
+                # 尝试使用 GitHub 代理列表
+                for gh_proxy in GITHUB_PROXIES:
+                    try:
+                        proxied_url = f"{gh_proxy.rstrip('/')}/{download_url}"
+                        success = await self._download_file(proxied_url, zip_path, timeout=30)
+                        if success:
+                            logger.info(f"使用代理 {gh_proxy} 下载成功")
+                            break
+                    except Exception as e:
+                        logger.warning(f"代理 {gh_proxy} 下载失败: {e}")
+                        continue
+
+            # 3. 直连下载
+            if not success:
+                logger.info("尝试直连下载")
+                success = await self._download_file(download_url, zip_path, timeout=60)
+
+            if not success or not zip_path.exists():
+                return {"success": False, "message": "下载插件失败"}
+
+            # 解压并安装插件
+            result = await self.upload_plugin(str(zip_path), pip_mirror=pip_mirror)
+
+            # 删除临时文件
+            try:
+                zip_path.unlink()
+            except Exception:
+                pass
+
+            return result
+
+        except Exception as e:
+            logger.error(f"从 URL 安装插件失败: {e}")
+            return {"success": False, "message": f"安装失败: {str(e)}"}
+
+    async def upload_plugin(self, zip_path: str, delete_data: bool = False, pip_mirror: Optional[str] = None) -> Dict[str, Any]:
+        """上传并安装本地 ZIP 插件
+
+        Args:
+            zip_path: ZIP 文件路径
+            delete_data: 是否删除已有数据
+            pip_mirror: pip 镜像源（可选）
+
+        Returns:
+            安装结果
+        """
+        try:
+            temp_dir = Path(tempfile.gettempdir()) / "nekobot_temp"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
+            # 解压 ZIP 文件
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_dir)
+
+            # 查找插件目录
+            plugin_dir = None
+            plugin_name = None
+
+            # 检查解压后的目录结构
+            for item in temp_dir.iterdir():
+                if item.is_dir():
+                    # 检查是否是插件目录（包含 main.py）
+                    if (item / "main.py").exists():
+                        plugin_dir = item
+                        plugin_name = item.name
+                        break
+                    # 检查是否有子目录是插件目录
+                    for sub_item in item.iterdir():
+                        if sub_item.is_dir() and (sub_item / "main.py").exists():
+                            plugin_dir = sub_item
+                            plugin_name = sub_item.name
+                            break
+                    if plugin_dir:
+                        break
+
+            if not plugin_dir or not plugin_name:
+                # 清理临时目录
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return {"success": False, "message": "未找到有效的插件目录（缺少 main.py）"}
+
+            # 读取插件元数据
+            metadata = self._load_plugin_metadata(plugin_dir)
+
+            # 检查插件是否已存在
+            target_dir = self.plugin_dir / plugin_name
+            if target_dir.exists():
+                # 备份现有插件
+                backup_dir = self.plugin_dir / f"{plugin_name}_backup"
+                if backup_dir.exists():
+                    shutil.rmtree(backup_dir)
+                shutil.move(str(target_dir), str(backup_dir))
+
+            try:
+                # 移动插件到目标目录
+                shutil.move(str(plugin_dir), str(target_dir))
+
+                # 如果有 _conf_schema.json，创建数据库表
+                conf_schema_path = target_dir / "_conf_schema.json"
+                if conf_schema_path.exists():
+                    with open(conf_schema_path, 'r', encoding='utf-8') as f:
+                        conf_schema = json.load(f)
+                    # 这里可以添加创建数据库表的逻辑
+                    logger.info(f"插件 {plugin_name} 包含配置 schema")
+
+                # 安装插件依赖
+                requirements_path = target_dir / "requirements.txt"
+                if requirements_path.exists():
+                    await self._install_plugin_dependencies(requirements_path, pip_mirror=pip_mirror)
+
+                # 清理临时目录
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+                # 删除备份
+                if backup_dir.exists():
+                    shutil.rmtree(backup_dir)
+
+                # 如果需要删除数据
+                if delete_data:
+                    self.delete_plugin_data(plugin_name)
+
+                # 重新加载插件
+                if plugin_name in self.plugins:
+                    await self.reload_plugin(plugin_name)
+                else:
+                    # 加载新插件
+                    await self._load_user_plugins()
+
+                logger.info(f"插件 {plugin_name} 安装成功")
+                return {
+                    "success": True,
+                    "message": f"插件 {plugin_name} 安装成功",
+                    "plugin_name": plugin_name,
+                    "metadata": metadata,
+                }
+
+            except Exception as e:
+                # 恢复备份
+                if backup_dir.exists():
+                    shutil.move(str(backup_dir), str(target_dir))
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                raise e
+
+        except Exception as e:
+            logger.error(f"上传插件失败: {e}")
+            return {"success": False, "message": f"上传插件失败: {str(e)}"}
+
+    async def install_plugin_from_git(
+        self, git_url: str, branch: str = "main", pip_mirror: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """从 Git 仓库克隆并安装插件
+
+        Args:
+            git_url: Git 仓库 URL
+            branch: 分支名称（默认 main）
+            pip_mirror: pip 镜像源（可选）
+
+        Returns:
+            安装结果
+        """
+        try:
+            import tempfile
+
+            temp_dir = Path(tempfile.gettempdir()) / "nekobot_git_clone"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
+            clone_dir = temp_dir / f"repo_{asyncio.get_event_loop().time():.0f}"
+
+            # 克隆仓库
+            cmd = ["git", "clone", "-b", branch, git_url, str(clone_dir)]
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                logger.error(f"Git 克隆失败: {stderr.decode()}")
+                return {"success": False, "message": f"Git 克隆失败: {stderr.decode()}"}
+
+            # 查找插件目录
+            plugin_dir = None
+            for item in clone_dir.iterdir():
+                if item.is_dir() and (item / "main.py").exists():
+                    plugin_dir = item
+                    break
+
+            if not plugin_dir:
+                return {"success": False, "message": "仓库中未找到有效的插件目录"}
+
+            # 复制到插件目录
+            plugin_name = plugin_dir.name
+            target_dir = self.plugin_dir / plugin_name
+
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+
+            shutil.move(str(plugin_dir), str(target_dir))
+
+            # 清理临时目录
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+            # 安装依赖
+            requirements_path = target_dir / "requirements.txt"
+            if requirements_path.exists():
+                await self._install_plugin_dependencies(requirements_path, pip_mirror=pip_mirror)
+
+            # 加载插件
+            await self._load_user_plugins()
+
+            logger.info(f"从 Git 仓库安装插件 {plugin_name} 成功")
+            return {
+                "success": True,
+                "message": f"插件 {plugin_name} 安装成功",
+                "plugin_name": plugin_name,
+            }
+
+        except Exception as e:
+            logger.error(f"从 Git 安装插件失败: {e}")
+            return {"success": False, "message": f"安装失败: {str(e)}"}
+
+    def _load_plugin_metadata(self, plugin_dir: Path) -> Dict[str, Any]:
+        """加载插件元数据
+
+        Args:
+            plugin_dir: 插件目录
+
+        Returns:
+            元数据字典
+        """
+        metadata_path = plugin_dir / "metadata.yaml"
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, 'r', encoding='utf-8') as f:
+                    return yaml.safe_load(f)
+            except Exception as e:
+                logger.warning(f"加载插件元数据失败: {e}")
+
+        # 返回默认元数据
+        return {
+            "name": plugin_dir.name,
+            "version": "1.0.0",
+            "description": "无描述",
+            "author": "未知",
+        }
+
+    async def _fetch_github_releases(self, api_url: str) -> list[dict]:
+        """获取 GitHub Releases 信息
+
+        Args:
+            api_url: GitHub API URL
+
+        Returns:
+            Releases 列表，每个元素包含 tag_name、zipball_url 等
+        """
+        try:
+            kwargs = {"timeout": aiohttp.ClientTimeout(total=30)}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, **kwargs) as response:
+                    if response.status == 200:
+                        releases = await response.json()
+                        if isinstance(releases, list) and len(releases) > 0:
+                            result = []
+                            for release in releases[:5]:  # 只取前5个
+                                result.append({
+                                    "tag_name": release.get("tag_name"),
+                                    "name": release.get("name"),
+                                    "zipball_url": release.get("zipball_url"),
+                                    "published_at": release.get("published_at"),
+                                    "body": release.get("body"),
+                                })
+                            return result
+                        return []
+                    else:
+                        logger.warning(f"获取 GitHub Releases 失败，状态码: {response.status}")
+                        return []
+        except Exception as e:
+            logger.warning(f"获取 GitHub Releases 异常: {e}")
+            return []
+
+    async def _download_file(
+        self,
+        url: str,
+        dest_path: Path,
+        proxy: Optional[str] = None,
+        timeout: int = 60
+    ) -> bool:
+        """下载文件
+
+        Args:
+            url: 下载 URL
+            dest_path: 目标路径
+            proxy: 代理设置
+            timeout: 超时时间（秒）
+
+        Returns:
+            是否下载成功
+        """
+        try:
+            import aiohttp
+
+            kwargs = {"timeout": aiohttp.ClientTimeout(total=timeout)}
+            if proxy:
+                kwargs["proxy"] = proxy
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, **kwargs) as response:
+                    if response.status == 200:
+                        content = await response.read()
+                        with open(dest_path, 'wb') as f:
+                            f.write(content)
+                        logger.info(f"文件下载成功: {dest_path}")
+                        return True
+                    else:
+                        logger.error(f"下载失败，状态码: {response.status}")
+                        return False
+
+        except Exception as e:
+            logger.error(f"下载文件失败: {e}")
+            return False
+
+    async def _install_plugin_dependencies(
+        self, requirements_path: Path, pip_mirror: Optional[str] = None
+    ) -> bool:
+        """安装插件依赖
+
+        Args:
+            requirements_path: requirements.txt 文件路径
+            pip_mirror: pip 镜像源（可选，如果未指定则使用清华源）
+
+        Returns:
+            是否安装成功
+        """
+        try:
+            with open(requirements_path, 'r', encoding='utf-8') as f:
+                requirements = f.read()
+
+            # 检查是否使用 uv
+            use_uv = shutil.which("uv") is not None
+
+            if use_uv:
+                cmd = ["uv", "pip", "install", "-r", str(requirements_path)]
+            else:
+                cmd = ["pip", "install", "-r", str(requirements_path)]
+
+            # 添加镜像源
+            if pip_mirror:
+                cmd.extend(["-i", pip_mirror])
+                logger.info(f"使用用户指定的 pip 镜像源: {pip_mirror}")
+            else:
+                # 默认使用清华源
+                cmd.extend(["-i", PIP_MIRRORS[0]])
+                logger.info(f"使用默认 pip 镜像源: {PIP_MIRRORS[0]}")
+
+            logger.info(f"安装插件依赖: {' '.join(cmd)}")
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                logger.info(f"插件依赖安装成功")
+                return True
+            else:
+                logger.error(f"插件依赖安装失败: {stderr.decode()}")
+                return False
+
+        except Exception as e:
+            logger.error(f"安装插件依赖失败: {e}")
+            return False
+
+    async def ping_github_proxies(self) -> Dict[str, Any]:
+        """测试 GitHub 代理可用性
+
+        Returns:
+            代理测试结果
+        """
+        results = []
+        test_url = "https://github.com"
+
+        for proxy in GITHUB_PROXIES:
+            try:
+                proxied_url = f"{proxy}/{test_url}"
+                start = asyncio.get_event_loop().time()
+                success = await self._download_file(
+                    proxied_url,
+                    Path(tempfile.gettempdir()) / "ping_test",
+                    timeout=10
+                )
+                elapsed = asyncio.get_event_loop().time() - start
+
+                results.append({
+                    "proxy": proxy,
+                    "available": success,
+                    "latency": round(elapsed * 1000, 2),  # 转换为毫秒
+                })
+
+            except Exception as e:
+                results.append({
+                    "proxy": proxy,
+                    "available": False,
+                    "latency": -1,
+                    "error": str(e),
+                })
+
+        return {"proxies": results}
 
     async def delete_plugin(self, plugin_name: str) -> Dict[str, Any]:
         """删除插件"""
@@ -526,33 +1052,42 @@ class PluginManager:
         
         return {"success": True, "message": f"插件 {plugin_name} 删除成功"}
 
-    def _parse_github_url(self, url: str) -> Optional[str]:
-        """解析 GitHub URL 并返回下载链接"""
-        # GitHub 仓库链接: https://github.com/user/repo
-        repo_pattern = r"https?://github\.com/([^/]+)/([^/]+)/?$"
-        match = re.match(repo_pattern, url)
+    def parse_github_url(self, url: str) -> tuple[str, str, str | None]:
+        """解析 GitHub 仓库 URL（参考 AstrBot 实现）
+
+        Args:
+            url: GitHub 仓库 URL
+
+        Returns:
+            (作者名, 仓库名, 分支名) 元组
+            如果分支为 None，则应尝试从 Releases API 获取或使用默认分支
+
+        Raises:
+            ValueError: 如果 URL 格式不正确
+        """
+        cleaned_url = url.rstrip("/")
+        # 支持: https://github.com/user/repo[.git][/tree/branch]
+        pattern = r"^https?://github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)(\.git)?(?:/tree/([a-zA-Z0-9_-]+))?$"
+        match = re.match(pattern, cleaned_url)
+
         if match:
-            user, repo = match.groups()
-            return f"https://github.com/{user}/{repo}/archive/refs/heads/main.zip"
-        # GitHub 分支链接: https://github.com/user/repo/tree/branch
-        branch_pattern = r"https?://github\.com/([^/]+)/([^/]+)/tree/([^/]+)/?$"
-        match = re.match(branch_pattern, url)
-        if match:
-            user, repo, branch = match.groups()
-            return f"https://github.com/{user}/{repo}/archive/refs/heads/{branch}.zip"
-        # GitHub Release 链接: https://github.com/user/repo/releases/tag/v1.0.0
-        release_pattern = (
-            r"https?://github\.com/([^/]+)/([^/]+)/releases/tag/([^/]+)/?$"
-        )
-        match = re.match(release_pattern, url)
-        if match:
-            user, repo, tag = match.groups()
-            return f"https://github.com/{user}/{repo}/archive/refs/tags/{tag}.zip"
-        # GitHub Archive 链接: https://github.com/user/repo/archive/refs/heads/main.zip
-        archive_pattern = r"https?://github\.com/([^/]+)/([^/]+)/archive/.*\.zip$"
-        if re.match(archive_pattern, url):
-            return url
-        return None
+            author = match.group(1)
+            repo = match.group(2)
+            branch = match.group(4)
+            return author, repo, branch
+
+        raise ValueError(f"无效的 GitHub URL: {url}")
+
+    def format_plugin_name(self, name: str) -> str:
+        """格式化插件名称（参考 AstrBot 实现）
+
+        Args:
+            name: 插件名称
+
+        Returns:
+            格式化后的名称（连字符转下划线，小写）
+        """
+        return name.replace("-", "_").lower()
 
 
 # 创建全局插件管理器实例

@@ -42,6 +42,7 @@ venv.bak/
 # IDE 配置
 # ============================================
 .vscode/
+.claude/
 .trae/
 .idea/
 *.swp
