@@ -105,6 +105,7 @@ from .routes.agent_route import AgentRoute
 from .routes.pipeline_route import PipelineRoute
 from .routes.tool_route import ToolRoute
 from .routes.conversation_route import ConversationRoute
+from .routes.config_editor_route import ConfigEditorRoute
 
 # 初始化应用状态
 app.plugins = {
@@ -179,6 +180,7 @@ agent_route = AgentRoute(route_context)
 pipeline_route = PipelineRoute(route_context)
 tool_route = ToolRoute(route_context)
 conversation_route = ConversationRoute(route_context)
+config_editor_route = ConfigEditorRoute(route_context)
 
 # 注册所有路由
 for route_class in [
@@ -208,6 +210,8 @@ for route_class in [
     pipeline_route,
     tool_route,
     conversation_route,
+    # 配置编辑器路由
+    config_editor_route,
 ]:
     for path, method, handler in route_class.routes:
         endpoint = getattr(handler.__func__, 'endpoint_name', handler.__name__)

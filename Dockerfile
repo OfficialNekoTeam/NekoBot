@@ -12,6 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # 安装系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制项目依赖文件
@@ -27,7 +28,12 @@ RUN uv pip install --system -e .
 COPY . .
 
 # 创建数据目录
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data/
+
+# 下载构建后的前端构建文件
+RUN curl -L -o /app/dist.zip http://github.com/NekoBotTeam/Nekobot-Dashboard/releases/latest/download/dist.zip && \
+    unzip -o /app/dist.zip -d /app && \
+    rm /app/dist.zip
 
 # 暴露端口
 EXPOSE 6285
