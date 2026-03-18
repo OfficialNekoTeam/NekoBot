@@ -46,6 +46,11 @@ class ProviderContext:
     actor_id: str | None = None
     conversation_id: str | None = None
     platform: str | None = None
+    platform_instance_uuid: str | None = None
+    scope: str | None = None
+    conversation_key: str | None = None
+    session_key: str | None = None
+    isolation_mode: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
