@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TypeAlias, override
+
+ValueMap: TypeAlias = dict[str, object]
 
 
 class IsolationMode:
-    PRIVATE = "private"
-    PER_USER = "per_user"
-    SHARED_GROUP = "shared_group"
-    HYBRID = "hybrid"
+    PRIVATE: str = "private"
+    PER_USER: str = "per_user"
+    SHARED_GROUP: str = "shared_group"
+    HYBRID: str = "hybrid"
 
 
 @dataclass(frozen=True)
 class ConversationKey:
     value: str
 
+    @override
     def __str__(self) -> str:
         return self.value
 
@@ -23,6 +26,7 @@ class ConversationKey:
 class SessionKey:
     value: str
 
+    @override
     def __str__(self) -> str:
         return self.value
 
@@ -35,7 +39,7 @@ class ScopeRoute:
     chat_id: str | None = None
     actor_id: str | None = None
     thread_id: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: ValueMap = field(default_factory=dict)
 
     def to_segments(self) -> tuple[str, ...]:
         segments = [self.platform_type, self.platform_instance_uuid, self.scope]

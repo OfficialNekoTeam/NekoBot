@@ -1,35 +1,92 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Protocol, TypeAlias
 
-from .models import ConversationKey, IsolationMode, SessionKey
+from .models import ConversationKey, IsolationMode, SessionKey, ValueMap
+
+ScopedValueMap: TypeAlias = dict[str, ValueMap]
+
+
+class ScopeExecution(Protocol):
+    scope: str
+    platform: str | None
+    platform_instance_uuid: str | None
+    chat_id: str | None
+    group_id: str | None
+    channel_id: str | None
 
 
 @dataclass(slots=True)
 class ConfigurationContext:
-    framework_config: dict[str, Any] = field(default_factory=dict)
-    plugin_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    provider_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    permission_config: dict[str, Any] = field(default_factory=dict)
-    moderation_config: dict[str, Any] = field(default_factory=dict)
-    conversation_config: dict[str, Any] = field(default_factory=dict)
-    plugin_bindings: dict[str, dict[str, Any]] = field(default_factory=dict)
+    framework_config: ValueMap = field(default_factory=dict)
+    plugin_configs: ScopedValueMap = field(default_factory=dict)
+    provider_configs: ScopedValueMap = field(default_factory=dict)
+    permission_config: ValueMap = field(default_factory=dict)
+    moderation_config: ValueMap = field(default_factory=dict)
+    conversation_config: ValueMap = field(default_factory=dict)
+    plugin_bindings: ScopedValueMap = field(default_factory=dict)
 
-    def get_plugin_config(self, plugin_name: str) -> dict[str, Any]:
+    def get_plugin_config(self, plugin_name: str) -> ValueMap:
         return dict(self.plugin_configs.get(plugin_name, {}))
 
-    def get_provider_config(self, provider_name: str) -> dict[str, Any]:
+    def get_provider_config(self, provider_name: str) -> ValueMap:
         return dict(self.provider_configs.get(provider_name, {}))
 
-    def get_plugin_binding(self, plugin_name: str) -> dict[str, Any]:
+    def get_plugin_binding(self, plugin_name: str) -> ValueMap:
         return dict(self.plugin_bindings.get(plugin_name, {}))
 
-    def is_plugin_enabled(self, plugin_name: str) -> bool:
+    def is_plugin_enabled(
+        self,
+        plugin_name: str,
+        execution: ScopeExecution | None = None,
+    ) -> bool:
         binding = self.get_plugin_binding(plugin_name)
+        if execution is not None and not self._binding_matches_scope(
+            binding, execution
+        ):
+            return False
         if "enabled" in binding:
             return bool(binding.get("enabled"))
+        return True
+
+    def _binding_matches_scope(
+        self,
+        binding: ValueMap,
+        execution: ScopeExecution,
+    ) -> bool:
+        scopes = binding.get("scopes")
+        if isinstance(scopes, list) and scopes and execution.scope not in scopes:
+            return False
+
+        platforms = binding.get("platforms")
+        if (
+            isinstance(platforms, list)
+            and platforms
+            and execution.platform not in platforms
+        ):
+            return False
+
+        instances = binding.get("platform_instances")
+        if (
+            isinstance(instances, list)
+            and instances
+            and execution.platform_instance_uuid not in instances
+        ):
+            return False
+
+        enabled_chats = binding.get("enabled_chats")
+        if isinstance(enabled_chats, list) and enabled_chats:
+            chat_id = execution.chat_id or execution.group_id or execution.channel_id
+            if chat_id not in enabled_chats:
+                return False
+
+        disabled_chats = binding.get("disabled_chats")
+        if isinstance(disabled_chats, list) and disabled_chats:
+            chat_id = execution.chat_id or execution.group_id or execution.channel_id
+            if chat_id in disabled_chats:
+                return False
+
         return True
 
     def resolve_provider_name(self, default: str | None = None) -> str | None:
@@ -88,52 +145,8 @@ class ConversationContext:
     chat_id: str | None = None
     actor_id: str | None = None
     thread_id: str | None = None
-    history: list[dict[str, Any]] = field(default_factory=list)
+    history: list[ValueMap] = field(default_factory=list)
     summary: str | None = None
     memory_refs: list[str] = field(default_factory=list)
-    provider_preferences: dict[str, Any] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-class InMemoryConversationStore:
-    def __init__(self) -> None:
-        self._conversations: dict[str, ConversationContext] = {}
-        self._sessions: dict[str, ConversationContext] = {}
-
-    def get_conversation(self, conversation_key: str) -> ConversationContext | None:
-        context = self._conversations.get(conversation_key)
-        if context is None:
-            return None
-        return replace(context)
-
-    def get_session(self, session_key: str) -> ConversationContext | None:
-        context = self._sessions.get(session_key)
-        if context is None:
-            return None
-        return replace(context)
-
-    def save(self, context: ConversationContext) -> ConversationContext:
-        stored = replace(
-            context,
-            history=list(context.history),
-            memory_refs=list(context.memory_refs),
-            provider_preferences=dict(context.provider_preferences),
-            metadata=dict(context.metadata),
-        )
-        if stored.conversation_key is not None:
-            self._conversations[stored.conversation_key.value] = stored
-        if stored.session_key is not None:
-            self._sessions[stored.session_key.value] = stored
-        return replace(stored)
-
-    def upsert(self, context: ConversationContext) -> ConversationContext:
-        return self.save(context)
-
-    def delete(self, conversation_key: str) -> None:
-        context = self._conversations.pop(conversation_key, None)
-        if context is None or context.session_key is None:
-            return
-        _ = self._sessions.pop(context.session_key.value, None)
-
-    def list_conversation_keys(self) -> tuple[str, ...]:
-        return tuple(sorted(self._conversations.keys()))
+    provider_preferences: ValueMap = field(default_factory=dict)
+    metadata: ValueMap = field(default_factory=dict)

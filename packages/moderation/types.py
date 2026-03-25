@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TypeAlias
+
+ValueMap: TypeAlias = dict[str, object]
 
 
 class ModerationStage:
-    INPUT = "input"
-    OUTPUT = "output"
-    FINAL_SEND = "final_send"
+    INPUT: str = "input"
+    OUTPUT: str = "output"
+    FINAL_SEND: str = "final_send"
 
 
 @dataclass(slots=True)
@@ -17,7 +19,7 @@ class ModerationRequest:
     actor_id: str | None = None
     platform: str | None = None
     conversation_key: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: ValueMap = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -26,7 +28,7 @@ class ModerationDecision:
     reason: str = ""
     rewritten_text: str | None = None
     source: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: ValueMap = field(default_factory=dict)
 
     @property
     def allowed(self) -> bool:

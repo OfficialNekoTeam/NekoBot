@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TypeAlias, cast
 
 from ..conversations.context import ConfigurationContext, ConversationContext
 from ..permissions import (
@@ -14,29 +14,40 @@ from ..permissions import (
 )
 from ..permissions.constants import ScopeName
 
+ValueMap: TypeAlias = dict[str, object]
 
 ReplyCallable = Callable[[str], Awaitable[None]]
-ProviderCallable = Callable[..., Awaitable[Any]]
-TaskCallable = Callable[[str, dict[str, Any]], Awaitable[Any]]
+ProviderCallable = Callable[..., Awaitable[object]]
+TaskCallable = Callable[[str, ValueMap], Awaitable[object]]
 PermissionCallable = Callable[[tuple[str, ...], bool], PermissionDecision]
 
 
 async def _noop_reply(message: str) -> None:
+    _ = message
     return None
 
 
-async def _missing_provider(*args: Any, **kwargs: Any) -> Any:
+async def _missing_provider(*args: object, **kwargs: object) -> object:
+    _ = args, kwargs
     raise RuntimeError("provider access is not configured for this context")
 
 
-async def _missing_task(name: str, payload: dict[str, Any]) -> Any:
+async def _missing_task(name: str, payload: ValueMap) -> object:
+    _ = name, payload
     raise RuntimeError("task scheduling is not configured for this context")
 
 
 def _allow_all_permissions(
     permissions: tuple[str, ...], require_all: bool
 ) -> PermissionDecision:
+    _ = permissions, require_all
     return PermissionDecision(allowed=True, reason="default allow")
+
+
+DEFAULT_REPLY_CALLABLE: ReplyCallable = _noop_reply
+DEFAULT_PROVIDER_CALLABLE: ProviderCallable = _missing_provider
+DEFAULT_TASK_CALLABLE: TaskCallable = _missing_task
+DEFAULT_PERMISSION_CALLABLE: PermissionCallable = _allow_all_permissions
 
 
 @dataclass(slots=True)
@@ -56,7 +67,7 @@ class ExecutionContext:
     platform_roles: tuple[str, ...] = ()
     group_roles: tuple[str, ...] = ()
     is_authenticated: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: ValueMap = field(default_factory=dict)
 
     def to_authorization_context(
         self, resource_kind: str, resource_name: str
@@ -82,14 +93,14 @@ class ExecutionContext:
 @dataclass(slots=True)
 class PluginContext:
     plugin_name: str
-    config: dict[str, Any] = field(default_factory=dict)
+    config: ValueMap = field(default_factory=dict)
     execution: ExecutionContext = field(default_factory=ExecutionContext)
     configuration: ConfigurationContext = field(default_factory=ConfigurationContext)
     conversation: ConversationContext | None = None
-    reply_callable: ReplyCallable = _noop_reply
-    provider_callable: ProviderCallable = _missing_provider
-    task_callable: TaskCallable = _missing_task
-    permission_callable: PermissionCallable = _allow_all_permissions
+    reply_callable: ReplyCallable = DEFAULT_REPLY_CALLABLE
+    provider_callable: ProviderCallable = DEFAULT_PROVIDER_CALLABLE
+    task_callable: TaskCallable = DEFAULT_TASK_CALLABLE
+    permission_callable: PermissionCallable = DEFAULT_PERMISSION_CALLABLE
     permission_engine: PermissionEngine | None = None
     resource_kind: str = "plugin"
 
@@ -100,13 +111,13 @@ class PluginContext:
     async def reply(self, message: str) -> None:
         await self.reply_callable(message)
 
-    async def request_provider(self, provider_name: str, **kwargs: Any) -> Any:
+    async def request_provider(self, provider_name: str, **kwargs: object) -> object:
         return await self.provider_callable(provider_name=provider_name, **kwargs)
 
-    async def schedule_task(self, task_name: str, payload: dict[str, Any]) -> Any:
+    async def schedule_task(self, task_name: str, payload: ValueMap) -> object:
         return await self.task_callable(task_name, payload)
 
-    def get_config(self, key: str, default: Any = None) -> Any:
+    def get_config(self, key: str, default: object = None) -> object:
         return self.config.get(key, default)
 
     def permission_decision(
@@ -132,23 +143,28 @@ class PluginContext:
 class EffectivePluginBinding:
     plugin_name: str
     enabled: bool
-    config: dict[str, Any] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    config: ValueMap = field(default_factory=dict)
+    metadata: ValueMap = field(default_factory=dict)
 
 
 def build_effective_plugin_binding(
     plugin_name: str,
     configuration: ConfigurationContext,
+    execution: ExecutionContext | None = None,
 ) -> EffectivePluginBinding:
     base_config = configuration.get_plugin_config(plugin_name)
     binding = configuration.get_plugin_binding(plugin_name)
     override_config = binding.get("config", {})
     merged_config = dict(base_config)
     if isinstance(override_config, dict):
-        merged_config.update(override_config)
-    enabled = configuration.is_plugin_enabled(plugin_name)
+        override_map = cast(dict[str, object], override_config)
+        merged_config.update(override_map)
+    enabled = configuration.is_plugin_enabled(plugin_name, execution=execution)
+    binding_map = cast(dict[object, object], binding)
     metadata = {
-        key: value for key, value in binding.items() if key not in {"enabled", "config"}
+        str(key): value
+        for key, value in binding_map.items()
+        if isinstance(key, str) and key not in {"enabled", "config"}
     }
     return EffectivePluginBinding(
         plugin_name=plugin_name,

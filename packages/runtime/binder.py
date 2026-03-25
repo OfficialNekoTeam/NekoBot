@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import inspect
 from types import ModuleType
-from typing import Any
+from typing import cast
 
 from ..contracts import RegisteredPlugin, RegisteredProvider
+from ..contracts.specs import (
+    CommandSpec,
+    EventHandlerSpec,
+    PermissionSpec,
+    PluginSpec,
+    ProviderSpec,
+    SchemaRef,
+)
 from ..decorators.core import (
     COMMAND_SPEC_ATTR,
     CONFIG_SCHEMA_ATTR,
@@ -18,66 +26,75 @@ from .registry import RuntimeRegistry
 
 class FrameworkBinder:
     def __init__(self, registry: RuntimeRegistry) -> None:
-        self.registry = registry
+        self.registry: RuntimeRegistry = registry
 
-    def bind_plugin_class(self, plugin_class: type[Any]) -> RegisteredPlugin:
-        plugin_spec = getattr(plugin_class, PLUGIN_SPEC_ATTR, None)
+    def bind_plugin_class(self, plugin_class: type[object]) -> RegisteredPlugin:
+        plugin_spec = cast(object, getattr(plugin_class, PLUGIN_SPEC_ATTR, None))
         if plugin_spec is None:
             raise ValueError(
                 f"plugin class is missing plugin metadata: {plugin_class.__name__}"
             )
+        plugin_spec = cast(PluginSpec, plugin_spec)
 
-        config_schema = getattr(plugin_class, CONFIG_SCHEMA_ATTR, None)
-        permission_spec = getattr(plugin_class, PERMISSION_SPEC_ATTR, None)
+        config_schema = cast(object, getattr(plugin_class, CONFIG_SCHEMA_ATTR, None))
+        permission_spec = cast(
+            object, getattr(plugin_class, PERMISSION_SPEC_ATTR, None)
+        )
         if config_schema is not None:
-            plugin_spec = type(plugin_spec)(
+            plugin_spec = PluginSpec(
                 name=plugin_spec.name,
                 version=plugin_spec.version,
                 description=plugin_spec.description,
-                config_schema=config_schema,
-                permissions=permission_spec or plugin_spec.permissions,
+                config_schema=cast(SchemaRef, config_schema),
+                permissions=cast(PermissionSpec | None, permission_spec)
+                or plugin_spec.permissions,
                 metadata=plugin_spec.metadata,
             )
         elif permission_spec is not None:
-            plugin_spec = type(plugin_spec)(
+            plugin_spec = PluginSpec(
                 name=plugin_spec.name,
                 version=plugin_spec.version,
                 description=plugin_spec.description,
                 config_schema=plugin_spec.config_schema,
-                permissions=permission_spec,
+                permissions=cast(PermissionSpec, permission_spec),
                 metadata=plugin_spec.metadata,
             )
 
-        commands: list[tuple[str, Any]] = []
-        event_handlers: list[tuple[str, Any]] = []
+        commands: list[tuple[str, CommandSpec]] = []
+        event_handlers: list[tuple[str, EventHandlerSpec]] = []
 
-        for member_name, member in inspect.getmembers(plugin_class):
-            command_spec = getattr(member, COMMAND_SPEC_ATTR, None)
+        members = cast(list[tuple[str, object]], inspect.getmembers(plugin_class))
+        for member_name, member in members:
+            command_spec = cast(object, getattr(member, COMMAND_SPEC_ATTR, None))
             if command_spec is not None:
-                permission = getattr(member, PERMISSION_SPEC_ATTR, None)
+                permission = cast(object, getattr(member, PERMISSION_SPEC_ATTR, None))
+                typed_command_spec = cast(CommandSpec, command_spec)
                 if permission is not None:
-                    command_spec = type(command_spec)(
-                        name=command_spec.name,
-                        description=command_spec.description,
-                        aliases=command_spec.aliases,
-                        argument_schema=command_spec.argument_schema,
-                        permissions=permission,
-                        metadata=command_spec.metadata,
+                    typed_command_spec = CommandSpec(
+                        name=typed_command_spec.name,
+                        description=typed_command_spec.description,
+                        aliases=typed_command_spec.aliases,
+                        argument_schema=typed_command_spec.argument_schema,
+                        permissions=cast(PermissionSpec, permission),
+                        metadata=typed_command_spec.metadata,
                     )
-                commands.append((member_name, command_spec))
+                commands.append((member_name, typed_command_spec))
 
-            event_handler_spec = getattr(member, EVENT_HANDLER_SPEC_ATTR, None)
+            event_handler_spec = cast(
+                object, getattr(member, EVENT_HANDLER_SPEC_ATTR, None)
+            )
             if event_handler_spec is not None:
-                permission = getattr(member, PERMISSION_SPEC_ATTR, None)
+                permission = cast(object, getattr(member, PERMISSION_SPEC_ATTR, None))
+                typed_event_spec = cast(EventHandlerSpec, event_handler_spec)
                 if permission is not None:
-                    event_handler_spec = type(event_handler_spec)(
-                        event=event_handler_spec.event,
-                        description=event_handler_spec.description,
-                        payload_schema=event_handler_spec.payload_schema,
-                        permissions=permission,
-                        metadata=event_handler_spec.metadata,
+                    typed_event_spec = EventHandlerSpec(
+                        event=typed_event_spec.event,
+                        description=typed_event_spec.description,
+                        payload_schema=typed_event_spec.payload_schema,
+                        permissions=cast(PermissionSpec, permission),
+                        metadata=typed_event_spec.metadata,
                     )
-                event_handlers.append((member_name, event_handler_spec))
+                event_handlers.append((member_name, typed_event_spec))
 
         registered = RegisteredPlugin(
             plugin_class=plugin_class,
@@ -88,24 +105,29 @@ class FrameworkBinder:
         self.registry.register_plugin(registered)
         return registered
 
-    def bind_provider_class(self, provider_class: type[Any]) -> RegisteredProvider:
-        provider_spec = getattr(provider_class, PROVIDER_SPEC_ATTR, None)
+    def bind_provider_class(self, provider_class: type[object]) -> RegisteredProvider:
+        provider_spec = cast(object, getattr(provider_class, PROVIDER_SPEC_ATTR, None))
         if provider_spec is None:
             raise ValueError(
                 "provider class is missing provider metadata: "
-                f"{provider_class.__name__}"
+                + provider_class.__name__
             )
+        provider_spec = cast(ProviderSpec, provider_spec)
 
-        config_schema = getattr(provider_class, CONFIG_SCHEMA_ATTR, None)
-        permission_spec = getattr(provider_class, PERMISSION_SPEC_ATTR, None)
+        config_schema = cast(object, getattr(provider_class, CONFIG_SCHEMA_ATTR, None))
+        permission_spec = cast(
+            object, getattr(provider_class, PERMISSION_SPEC_ATTR, None)
+        )
         if config_schema is not None or permission_spec is not None:
-            provider_spec = type(provider_spec)(
+            provider_spec = ProviderSpec(
                 name=provider_spec.name,
                 kind=provider_spec.kind,
                 description=provider_spec.description,
-                config_schema=config_schema or provider_spec.config_schema,
+                config_schema=cast(SchemaRef | None, config_schema)
+                or provider_spec.config_schema,
                 capabilities=provider_spec.capabilities,
-                permissions=permission_spec or provider_spec.permissions,
+                permissions=cast(PermissionSpec | None, permission_spec)
+                or provider_spec.permissions,
                 metadata=provider_spec.metadata,
             )
 
@@ -116,9 +138,10 @@ class FrameworkBinder:
         return registered
 
     def bind_module(self, module: ModuleType) -> None:
-        for _, member in inspect.getmembers(module):
+        members = cast(list[tuple[str, object]], inspect.getmembers(module))
+        for _, member in members:
             if inspect.isclass(member):
                 if getattr(member, PLUGIN_SPEC_ATTR, None) is not None:
-                    self.bind_plugin_class(member)
+                    _ = self.bind_plugin_class(cast(type[object], member))
                 if getattr(member, PROVIDER_SPEC_ATTR, None) is not None:
-                    self.bind_provider_class(member)
+                    _ = self.bind_provider_class(cast(type[object], member))

@@ -8,11 +8,13 @@ from .base import (
 )
 from .registry import ProviderRegistry
 from .types import (
+    ChatMessage,
     EmbeddingRequest,
     EmbeddingResponse,
     ModelCapability,
     ModelDescriptor,
     ProviderContext,
+    ProviderErrorInfo,
     ProviderInfo,
     ProviderKind,
     ProviderRequest,
@@ -21,12 +23,16 @@ from .types import (
     RerankResponse,
     STTRequest,
     STTResponse,
+    TokenUsage,
+    ToolCall,
+    ToolDefinition,
     TTSRequest,
     TTSResponse,
 )
 
 __all__ = [
     "BaseProvider",
+    "ChatMessage",
     "ChatProvider",
     "EmbeddingProvider",
     "EmbeddingRequest",
@@ -34,6 +40,7 @@ __all__ = [
     "ModelCapability",
     "ModelDescriptor",
     "ProviderContext",
+    "ProviderErrorInfo",
     "ProviderInfo",
     "ProviderKind",
     "ProviderRegistry",
@@ -45,6 +52,9 @@ __all__ = [
     "STTProvider",
     "STTRequest",
     "STTResponse",
+    "TokenUsage",
+    "ToolCall",
+    "ToolDefinition",
     "TTSProvider",
     "TTSRequest",
     "TTSResponse",

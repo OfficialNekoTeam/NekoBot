@@ -6,7 +6,7 @@ from ..schema import ObjectSchema, SchemaRegistry
 
 class RuntimeRegistry:
     def __init__(self, schema_registry: SchemaRegistry | None = None) -> None:
-        self.schema_registry = schema_registry or SchemaRegistry()
+        self.schema_registry: SchemaRegistry = schema_registry or SchemaRegistry()
         self.plugins: dict[str, RegisteredPlugin] = {}
         self.providers: dict[str, RegisteredProvider] = {}
 

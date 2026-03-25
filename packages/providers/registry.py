@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import cast
 
 from ..contracts import RegisteredProvider
 from ..runtime import RuntimeRegistry
 from ..schema import SchemaRegistry
 from .base import BaseProvider
-from .types import ProviderInfo
+from .types import ProviderInfo, ValueMap
 
 
 class ProviderRegistry:
@@ -15,17 +15,19 @@ class ProviderRegistry:
         runtime_registry: RuntimeRegistry,
         schema_registry: SchemaRegistry,
     ) -> None:
-        self.runtime_registry = runtime_registry
-        self.schema_registry = schema_registry
-        self._configs: dict[str, dict[str, Any]] = {}
+        self.runtime_registry: RuntimeRegistry = runtime_registry
+        self.schema_registry: SchemaRegistry = schema_registry
+        self._configs: dict[str, ValueMap] = {}
         self._instances: dict[str, BaseProvider] = {}
 
-    def configure(self, provider_name: str, config: dict[str, Any]) -> None:
+    async def configure(self, provider_name: str, config: ValueMap) -> None:
         registered = self.get_registered(provider_name)
         if registered.spec.config_schema is not None:
             self.schema_registry.validate(registered.spec.config_schema.name, config)
         self._configs[provider_name] = dict(config)
-        self._instances.pop(provider_name, None)
+        instance = self._instances.pop(provider_name, None)
+        if instance is not None:
+            await instance.close()
 
     def register_instance(self, provider_name: str, instance: BaseProvider) -> None:
         self._instances[provider_name] = instance
@@ -36,18 +38,31 @@ class ProviderRegistry:
         except KeyError as exc:
             raise KeyError(f"provider not registered: {provider_name}") from exc
 
-    def create(self, provider_name: str) -> BaseProvider:
+    async def get(self, provider_name: str) -> BaseProvider:
         if provider_name in self._instances:
-            return self._instances[provider_name]
+            instance = self._instances[provider_name]
+            await instance.ensure_setup()
+            return instance
 
         registered = self.get_registered(provider_name)
-        provider_class = registered.provider_class
+        provider_class = cast(type[BaseProvider], registered.provider_class)
         instance = provider_class(
             config=self._configs.get(provider_name, {}),
             schema_registry=self.schema_registry,
         )
+        await instance.ensure_setup()
         self._instances[provider_name] = instance
         return instance
+
+    async def shutdown_provider(self, provider_name: str) -> None:
+        instance = self._instances.pop(provider_name, None)
+        if instance is None:
+            return
+        await instance.close()
+
+    async def shutdown_all(self) -> None:
+        for provider_name in tuple(self._instances.keys()):
+            await self.shutdown_provider(provider_name)
 
     def list_registered(self) -> tuple[str, ...]:
         return tuple(sorted(self.runtime_registry.providers.keys()))

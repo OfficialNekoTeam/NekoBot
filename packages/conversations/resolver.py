@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..permissions.constants import ScopeName
 from .context import ConfigurationContext, ConversationContext
 from .models import ConversationKey, IsolationMode, ScopeRoute, SessionKey
-from ..permissions.constants import ScopeName
 
 if TYPE_CHECKING:
     from ..runtime.context import ExecutionContext

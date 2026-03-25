@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import cast
 
 from .conversations import (
     ConfigurationContext,
     ConversationContext,
     ConversationResolver,
-    InMemoryConversationStore,
+    ConversationStore,
+    SQLiteConversationStore,
 )
+from .moderation import ModerationService
+from .moderation.types import ModerationDecision, ModerationRequest, ModerationStage
 from .permissions import PermissionDecision, PermissionEngine
-from .permissions.constants import PermissionName
+from .permissions.constants import PermissionName, ScopeName
 from .providers import (
     ChatProvider,
     EmbeddingProvider,
@@ -20,12 +24,15 @@ from .providers import (
     TTSProvider,
 )
 from .providers.types import (
+    ChatMessage,
     EmbeddingRequest,
     ProviderContext,
     ProviderRequest,
     RerankRequest,
     STTRequest,
+    ToolDefinition,
     TTSRequest,
+    ValueMap,
 )
 from .runtime import FrameworkBinder, RuntimeRegistry
 from .runtime import context as runtime_context
@@ -34,13 +41,19 @@ from .schema import ObjectSchema, SchemaRegistry
 
 
 class NekoBotFramework:
-    def __init__(self) -> None:
-        self.schema_registry = SchemaRegistry()
-        self.runtime_registry = RuntimeRegistry(schema_registry=self.schema_registry)
-        self.binder = FrameworkBinder(self.runtime_registry)
-        self.conversation_resolver = ConversationResolver()
-        self.conversation_store = InMemoryConversationStore()
-        self.provider_registry = ProviderRegistry(
+    def __init__(self, conversation_store: ConversationStore | None = None) -> None:
+        self.schema_registry: SchemaRegistry = SchemaRegistry()
+        self.runtime_registry: RuntimeRegistry = RuntimeRegistry(
+            schema_registry=self.schema_registry
+        )
+        self.binder: FrameworkBinder = FrameworkBinder(self.runtime_registry)
+        self.conversation_resolver: ConversationResolver = ConversationResolver()
+        self.conversation_store: ConversationStore = (
+            conversation_store
+            or SQLiteConversationStore(Path("data/conversations.sqlite3"))
+        )
+        self.moderation_service: ModerationService = ModerationService()
+        self.provider_registry: ProviderRegistry = ProviderRegistry(
             runtime_registry=self.runtime_registry,
             schema_registry=self.schema_registry,
         )
@@ -51,19 +64,55 @@ class NekoBotFramework:
     def bind_module(self, module: ModuleType) -> None:
         self.binder.bind_module(module)
 
-    def build_execution_context(self, **kwargs: Any) -> ExecutionContext:
-        return ExecutionContext(**kwargs)
+    def build_execution_context(
+        self,
+        *,
+        event_name: str = "",
+        actor_id: str | None = None,
+        platform: str | None = None,
+        platform_instance_uuid: str | None = None,
+        conversation_id: str | None = None,
+        chat_id: str | None = None,
+        group_id: str | None = None,
+        channel_id: str | None = None,
+        thread_id: str | None = None,
+        message_id: str | None = None,
+        scope: str = ScopeName.GLOBAL,
+        roles: tuple[str, ...] = (),
+        platform_roles: tuple[str, ...] = (),
+        group_roles: tuple[str, ...] = (),
+        is_authenticated: bool = False,
+        metadata: dict[str, object] | None = None,
+    ) -> ExecutionContext:
+        return ExecutionContext(
+            event_name=event_name,
+            actor_id=actor_id,
+            platform=platform,
+            platform_instance_uuid=platform_instance_uuid,
+            conversation_id=conversation_id,
+            chat_id=chat_id,
+            group_id=group_id,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            message_id=message_id,
+            scope=scope,
+            roles=roles,
+            platform_roles=platform_roles,
+            group_roles=group_roles,
+            is_authenticated=is_authenticated,
+            metadata=metadata or {},
+        )
 
     def build_configuration_context(
         self,
         *,
-        framework_config: dict[str, Any] | None = None,
-        plugin_configs: dict[str, dict[str, Any]] | None = None,
-        provider_configs: dict[str, dict[str, Any]] | None = None,
-        permission_config: dict[str, Any] | None = None,
-        moderation_config: dict[str, Any] | None = None,
-        conversation_config: dict[str, Any] | None = None,
-        plugin_bindings: dict[str, dict[str, Any]] | None = None,
+        framework_config: dict[str, object] | None = None,
+        plugin_configs: dict[str, dict[str, object]] | None = None,
+        provider_configs: dict[str, dict[str, object]] | None = None,
+        permission_config: dict[str, object] | None = None,
+        moderation_config: dict[str, object] | None = None,
+        conversation_config: dict[str, object] | None = None,
+        plugin_bindings: dict[str, dict[str, object]] | None = None,
     ) -> ConfigurationContext:
         return ConfigurationContext(
             framework_config=framework_config or {},
@@ -91,6 +140,52 @@ class NekoBotFramework:
     ) -> ConversationContext:
         return self.conversation_store.save(conversation)
 
+    async def review_input(
+        self,
+        *,
+        text: str,
+        execution: ExecutionContext,
+        configuration: ConfigurationContext | None = None,
+    ) -> ModerationDecision:
+        return await self._review_text(
+            stage=ModerationStage.INPUT,
+            text=text,
+            execution=execution,
+            configuration=configuration,
+        )
+
+    async def review_output(
+        self,
+        *,
+        text: str,
+        execution: ExecutionContext,
+        configuration: ConfigurationContext | None = None,
+        conversation: ConversationContext | None = None,
+    ) -> ModerationDecision:
+        return await self._review_text(
+            stage=ModerationStage.OUTPUT,
+            text=text,
+            execution=execution,
+            configuration=configuration,
+            conversation=conversation,
+        )
+
+    async def review_final_send(
+        self,
+        *,
+        text: str,
+        execution: ExecutionContext,
+        configuration: ConfigurationContext | None = None,
+        conversation: ConversationContext | None = None,
+    ) -> ModerationDecision:
+        return await self._review_text(
+            stage=ModerationStage.FINAL_SEND,
+            text=text,
+            execution=execution,
+            configuration=configuration,
+            conversation=conversation,
+        )
+
     def build_provider_context(
         self,
         *,
@@ -98,7 +193,7 @@ class NekoBotFramework:
         execution: ExecutionContext,
         conversation: ConversationContext | None = None,
         model: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> ProviderContext:
         conversation = conversation or self.build_conversation_context(execution)
         return ProviderContext(
@@ -155,6 +250,38 @@ class NekoBotFramework:
             metadata={**stored.metadata, **resolved.metadata},
         )
 
+    async def _review_text(
+        self,
+        *,
+        stage: str,
+        text: str,
+        execution: ExecutionContext,
+        configuration: ConfigurationContext | None = None,
+        conversation: ConversationContext | None = None,
+    ) -> ModerationDecision:
+        configuration = configuration or self.build_configuration_context()
+        conversation = conversation or self.build_conversation_context(
+            execution=execution,
+            configuration=configuration,
+        )
+        preferred_backend = configuration.resolve_moderation_strategy()
+        request = ModerationRequest(
+            stage=stage,
+            text=text,
+            actor_id=execution.actor_id,
+            platform=execution.platform,
+            conversation_key=(
+                conversation.conversation_key.value
+                if conversation.conversation_key is not None
+                else None
+            ),
+            metadata=execution.metadata.copy(),
+        )
+        return await self.moderation_service.review(
+            request,
+            preferred_backend=preferred_backend,
+        )
+
     def build_plugin_context(
         self,
         *,
@@ -162,27 +289,67 @@ class NekoBotFramework:
         execution: ExecutionContext,
         configuration: ConfigurationContext | None = None,
         conversation: ConversationContext | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> PluginContext:
         configuration = configuration or self.build_configuration_context()
         conversation = conversation or self.build_conversation_context(
             execution=execution,
             configuration=configuration,
         )
-        binding = kwargs.pop("binding", None)
-        if binding is None:
+        binding_value = kwargs.pop("binding", None)
+        if isinstance(binding_value, runtime_context.EffectivePluginBinding):
+            binding = binding_value
+        else:
             binding = self.build_effective_plugin_binding(
                 plugin_name=plugin_name,
                 configuration=configuration,
+                execution=execution,
             )
         if not binding.enabled:
             raise ValueError(
                 f"plugin is disabled for current configuration: {plugin_name}"
             )
 
-        config = kwargs.pop("config", binding.config)
-        permission_engine = kwargs.get("permission_engine")
-        provider_callable = kwargs.pop("provider_callable", None)
+        config_value = kwargs.pop("config", binding.config)
+        config = (
+            cast(runtime_context.ValueMap, config_value)
+            if isinstance(config_value, dict)
+            else binding.config
+        )
+        permission_engine_value = kwargs.get("permission_engine")
+        permission_engine = (
+            permission_engine_value
+            if isinstance(permission_engine_value, PermissionEngine)
+            else None
+        )
+        reply_callable_value = kwargs.get("reply_callable")
+        reply_callable = (
+            cast(runtime_context.ReplyCallable, reply_callable_value)
+            if callable(reply_callable_value)
+            else None
+        )
+        task_callable_value = kwargs.get("task_callable")
+        task_callable = (
+            cast(runtime_context.TaskCallable, task_callable_value)
+            if callable(task_callable_value)
+            else None
+        )
+        permission_callable_value = kwargs.get("permission_callable")
+        permission_callable = (
+            cast(runtime_context.PermissionCallable, permission_callable_value)
+            if callable(permission_callable_value)
+            else None
+        )
+        resource_kind_value = kwargs.get("resource_kind")
+        resource_kind = (
+            resource_kind_value if isinstance(resource_kind_value, str) else "plugin"
+        )
+        provider_callable_value = kwargs.pop("provider_callable", None)
+        provider_callable = (
+            cast(runtime_context.ProviderCallable, provider_callable_value)
+            if callable(provider_callable_value)
+            else None
+        )
         if provider_callable is None:
             provider_callable = self._build_provider_callable(
                 execution=execution,
@@ -196,8 +363,14 @@ class NekoBotFramework:
             execution=execution,
             configuration=configuration,
             conversation=conversation,
+            reply_callable=reply_callable or runtime_context.DEFAULT_REPLY_CALLABLE,
             provider_callable=provider_callable,
-            **kwargs,
+            task_callable=task_callable or runtime_context.DEFAULT_TASK_CALLABLE,
+            permission_callable=(
+                permission_callable or runtime_context.DEFAULT_PERMISSION_CALLABLE
+            ),
+            permission_engine=permission_engine,
+            resource_kind=resource_kind,
         )
 
     def build_effective_plugin_binding(
@@ -205,14 +378,18 @@ class NekoBotFramework:
         *,
         plugin_name: str,
         configuration: ConfigurationContext,
+        execution: ExecutionContext | None = None,
     ) -> runtime_context.EffectivePluginBinding:
         return runtime_context.build_effective_plugin_binding(
-            plugin_name, configuration
+            plugin_name,
+            configuration,
+            execution,
         )
 
     def resolve_effective_plugin_bindings(
         self,
         configuration: ConfigurationContext,
+        execution: ExecutionContext | None = None,
         plugin_names: list[str] | tuple[str, ...] | None = None,
     ) -> tuple[runtime_context.EffectivePluginBinding, ...]:
         names = plugin_names or tuple(sorted(self.runtime_registry.plugins.keys()))
@@ -221,6 +398,7 @@ class NekoBotFramework:
             binding = self.build_effective_plugin_binding(
                 plugin_name=plugin_name,
                 configuration=configuration,
+                execution=execution,
             )
             if binding.enabled:
                 bindings.append(binding)
@@ -233,14 +411,26 @@ class NekoBotFramework:
         configuration: ConfigurationContext,
         conversation: ConversationContext,
         permission_engine: PermissionEngine | None,
-    ):
-        async def call_provider(provider_name: str, **kwargs: Any) -> Any:
+    ) -> runtime_context.ProviderCallable:
+        async def call_provider(
+            provider_name: str,
+            request: ProviderRequest
+            | EmbeddingRequest
+            | TTSRequest
+            | STTRequest
+            | RerankRequest
+            | None = None,
+            model: str | None = None,
+            **kwargs: object,
+        ) -> object:
             return await self.invoke_provider(
                 provider_name=provider_name,
                 execution=execution,
                 configuration=configuration,
                 conversation=conversation,
                 permission_engine=permission_engine,
+                request=request,
+                model=model,
                 **kwargs,
             )
 
@@ -254,10 +444,15 @@ class NekoBotFramework:
         configuration: ConfigurationContext | None = None,
         conversation: ConversationContext | None = None,
         permission_engine: PermissionEngine | None = None,
-        request: Any = None,
+        request: ProviderRequest
+        | EmbeddingRequest
+        | TTSRequest
+        | STTRequest
+        | RerankRequest
+        | None = None,
         model: str | None = None,
-        **kwargs: Any,
-    ) -> Any:
+        **kwargs: object,
+    ) -> object:
         configuration = configuration or self.build_configuration_context()
         conversation = conversation or self.build_conversation_context(
             execution=execution,
@@ -266,17 +461,18 @@ class NekoBotFramework:
 
         provider_config = configuration.get_provider_config(provider_name)
         if provider_config:
-            self.provider_registry.configure(provider_name, provider_config)
+            await self.provider_registry.configure(provider_name, provider_config)
 
+        metadata_value = kwargs.pop("metadata", None)
         provider_context = self.build_provider_context(
             provider_name=provider_name,
             execution=execution,
             conversation=conversation,
             model=model,
-            metadata=kwargs.pop("metadata", None),
+            metadata=cast(dict[str, object] | None, metadata_value),
         )
 
-        provider = self.provider_registry.create(provider_name)
+        provider = await self.provider_registry.get(provider_name)
         _ = self._enforce_provider_permissions(
             provider_name=provider_name,
             execution=execution,
@@ -293,7 +489,7 @@ class NekoBotFramework:
         else:
             request.context = provider_context
 
-        if isinstance(provider, ChatProvider):
+        if isinstance(provider, ChatProvider) and isinstance(request, ProviderRequest):
             return await provider.generate(request)
         if isinstance(provider, EmbeddingProvider) and isinstance(
             request, EmbeddingRequest
@@ -352,19 +548,108 @@ class NekoBotFramework:
         provider_name: str,
         provider_context: ProviderContext,
         model: str | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> ProviderRequest:
+        prompt = kwargs.pop("prompt", None)
+        system_prompt = kwargs.pop("system_prompt", None)
+        messages_value = kwargs.pop("messages", [])
+        tools_value = kwargs.pop("tools", [])
+        stream_value = kwargs.pop("stream", False)
+        messages = self._coerce_chat_messages(messages_value)
+        tools = self._coerce_tool_definitions(tools_value)
+
         return ProviderRequest(
             model=model,
-            prompt=kwargs.pop("prompt", None),
-            system_prompt=kwargs.pop("system_prompt", None),
-            messages=list(kwargs.pop("messages", [])),
-            tools=list(kwargs.pop("tools", [])),
-            stream=bool(kwargs.pop("stream", False)),
+            prompt=prompt if isinstance(prompt, str) or prompt is None else None,
+            system_prompt=(
+                system_prompt
+                if isinstance(system_prompt, str) or system_prompt is None
+                else None
+            ),
+            messages=messages,
+            tools=tools,
+            stream=bool(stream_value),
             options={"provider_name": provider_name, **kwargs},
             context=provider_context,
         )
 
+    def _coerce_chat_messages(self, value: object) -> list[ChatMessage]:
+        if not isinstance(value, list):
+            return []
 
-def create_framework() -> NekoBotFramework:
-    return NekoBotFramework()
+        messages: list[ChatMessage] = []
+        items = cast(list[object], value)
+        for item in items:
+            coerced = self._coerce_chat_message(item)
+            if coerced is not None:
+                messages.append(coerced)
+        return messages
+
+    def _coerce_chat_message(self, value: object) -> ChatMessage | None:
+        if isinstance(value, ChatMessage):
+            return value
+        if not isinstance(value, dict):
+            return None
+
+        raw = cast(dict[object, object], value)
+        role = raw.get("role")
+        content = raw.get("content")
+        if not isinstance(role, str) or not isinstance(content, str):
+            return None
+
+        name = raw.get("name")
+        metadata = self._coerce_value_map(raw.get("metadata"))
+        return ChatMessage(
+            role=role,
+            content=content,
+            name=name if isinstance(name, str) else None,
+            metadata=metadata,
+        )
+
+    def _coerce_tool_definitions(self, value: object) -> list[ToolDefinition]:
+        if not isinstance(value, list):
+            return []
+
+        tools: list[ToolDefinition] = []
+        items = cast(list[object], value)
+        for item in items:
+            coerced = self._coerce_tool_definition(item)
+            if coerced is not None:
+                tools.append(coerced)
+        return tools
+
+    def _coerce_tool_definition(self, value: object) -> ToolDefinition | None:
+        if isinstance(value, ToolDefinition):
+            return value
+        if not isinstance(value, dict):
+            return None
+
+        raw = cast(dict[object, object], value)
+        name = raw.get("name")
+        if not isinstance(name, str):
+            return None
+
+        description = raw.get("description")
+        parameters = self._coerce_value_map(raw.get("parameters"))
+        metadata = self._coerce_value_map(raw.get("metadata"))
+        return ToolDefinition(
+            name=name,
+            description=description if isinstance(description, str) else "",
+            parameters=parameters,
+            metadata=metadata,
+        )
+
+    def _coerce_value_map(self, value: object) -> ValueMap:
+        if not isinstance(value, dict):
+            return {}
+        return {
+            str(key): item
+            for key, item in cast(dict[object, object], value).items()
+            if isinstance(key, str)
+        }
+
+
+def create_framework(
+    conversation_store: ConversationStore | None = None,
+) -> NekoBotFramework:
+    return NekoBotFramework(conversation_store=conversation_store)

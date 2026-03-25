@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import cast
 
 from ..contracts import ProviderSpec
 from ..decorators.core import PROVIDER_SPEC_ATTR
@@ -18,28 +18,30 @@ from .types import (
     STTResponse,
     TTSRequest,
     TTSResponse,
+    ValueMap,
 )
 
 
 class BaseProvider(ABC):
     def __init__(
         self,
-        config: dict[str, Any] | None = None,
+        config: ValueMap | None = None,
         schema_registry: SchemaRegistry | None = None,
     ) -> None:
-        self.config = config or {}
-        self.schema_registry = schema_registry
-        self._spec = self.provider_spec()
+        self.config: ValueMap = self._resolve_config(config or {})
+        self.schema_registry: SchemaRegistry | None = schema_registry
+        self._spec: ProviderSpec = self.provider_spec()
+        self._is_setup: bool = False
         self._validate_config()
 
     @classmethod
     def provider_spec(cls) -> ProviderSpec:
-        spec = getattr(cls, PROVIDER_SPEC_ATTR, None)
+        spec = cast(object, getattr(cls, PROVIDER_SPEC_ATTR, None))
         if spec is None:
             raise ValueError(
                 f"provider class is missing provider metadata: {cls.__name__}"
             )
-        return spec
+        return cast(ProviderSpec, spec)
 
     @property
     def spec(self) -> ProviderSpec:
@@ -68,8 +70,33 @@ class BaseProvider(ABC):
     async def teardown(self) -> None:
         return None
 
+    async def ensure_setup(self) -> None:
+        if self._is_setup:
+            return
+        await self.setup()
+        self._is_setup = True
+
+    async def close(self) -> None:
+        if not self._is_setup:
+            return
+        await self.teardown()
+        self._is_setup = False
+
     def supports_capability(self, capability: str) -> bool:
         return capability in self._spec.capabilities
+
+    def update_config(self, config: ValueMap) -> None:
+        self.config = self._resolve_config(config)
+        self._validate_config()
+
+    def _resolve_config(self, config: ValueMap) -> ValueMap:
+        spec = self.provider_spec()
+        default_config = cast(object, spec.metadata.get("default_config", {}))
+        merged: ValueMap = {}
+        if isinstance(default_config, dict):
+            merged.update(cast(ValueMap, default_config))
+        merged.update(config)
+        return merged
 
     def _validate_config(self) -> None:
         if self.schema_registry is None:
