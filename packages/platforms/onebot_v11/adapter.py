@@ -1,26 +1,22 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from typing import TypeAlias, cast
+from typing import cast
+
+from loguru import logger
 
 from ...app import NekoBotFramework
 from ...conversations.context import ConfigurationContext
+from ...llm.handler import LLMHandler
 from .config import OneBotV11AdapterConfig, build_onebot_v11_config
 from .dispatch import OneBotV11Dispatcher
 from .event_parser import OneBotV11EventParser
 from .message_codec import OneBotV11MessageCodec
 from .transport import OneBotV11Transport, OneBotV11TransportConfig, RawEventHandler
 from .types import (
-    OneBotV11Event,
     OneBotV11MessageSegment,
     OneBotV11OutboundTarget,
     ValueMap,
 )
-
-TransportCallable: TypeAlias = Callable[
-    [str, dict[str, object]], Awaitable[dict[str, object]]
-]
-EventHandlerCallable: TypeAlias = Callable[[OneBotV11Event], Awaitable[None]]
 
 
 class OneBotV11Adapter:
@@ -28,22 +24,20 @@ class OneBotV11Adapter:
         self,
         config: OneBotV11AdapterConfig,
         *,
-        event_handler: EventHandlerCallable | None = None,
-        transport: TransportCallable | None = None,
         parser: OneBotV11EventParser | None = None,
         message_codec: OneBotV11MessageCodec | None = None,
         dispatcher: OneBotV11Dispatcher | None = None,
         transport_runtime: OneBotV11Transport | None = None,
+        configuration: ConfigurationContext | None = None,
     ) -> None:
         self.config: OneBotV11AdapterConfig = config
-        self.event_handler: EventHandlerCallable | None = event_handler
-        self.transport: TransportCallable | None = transport
         self.parser: OneBotV11EventParser = parser or OneBotV11EventParser()
         self.message_codec: OneBotV11MessageCodec = (
             message_codec or OneBotV11MessageCodec()
         )
         self.dispatcher: OneBotV11Dispatcher | None = dispatcher
         self.transport_runtime: OneBotV11Transport | None = transport_runtime
+        self.configuration: ConfigurationContext | None = configuration
         self._running: bool = False
 
     @property
@@ -60,23 +54,22 @@ class OneBotV11Adapter:
             await self.transport_runtime.stop()
         self._running = False
 
-    async def handle_raw_event(self, raw_event: ValueMap) -> OneBotV11Event:
+    async def handle_raw_event(self, raw_event: ValueMap) -> None:
         event = self.parser.parse(
             raw_event,
             platform_instance_uuid=self.config.instance_uuid,
         )
-        if self.event_handler is not None:
-            await self.event_handler(event)
-        return event
+        if self.dispatcher is not None:
+            await self.dispatcher.dispatch_event(event, self.configuration)
 
     async def call_api(
         self,
         action: str,
         params: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        if self.transport is None:
+        if self.transport_runtime is None:
             raise RuntimeError("OneBot v11 transport is not configured")
-        return await self.transport(action, params or {})
+        return await self.transport_runtime.call_api(action, params)
 
     async def send_private_message(
         self,
@@ -103,23 +96,6 @@ class OneBotV11Adapter:
         )
 
     async def send_to_target(
-        self,
-        target: OneBotV11OutboundTarget,
-        segments: list[OneBotV11MessageSegment],
-    ) -> dict[str, object]:
-        if target.scene == "group" and target.group_id is not None:
-            return await self.send_group_message(
-                group_id=target.group_id,
-                segments=segments,
-            )
-        if target.user_id is not None:
-            return await self.send_private_message(
-                user_id=target.user_id,
-                segments=segments,
-            )
-        raise ValueError("OneBot v11 outbound target is missing required identifiers")
-
-    async def send_to_target_from_payload(
         self,
         target: OneBotV11OutboundTarget,
         payload: list[dict[str, object]],
@@ -170,12 +146,6 @@ def create_onebot_v11_adapter(
 
     normalized_config = build_onebot_v11_config(config)
     message_codec = OneBotV11MessageCodec()
-    adapter: OneBotV11Adapter
-
-    async def event_handler(event: OneBotV11Event) -> None:
-        if adapter.dispatcher is None:
-            return
-        _ = await adapter.dispatcher.dispatch_event(event, configuration)
 
     transport = OneBotV11Transport(
         OneBotV11TransportConfig(
@@ -184,29 +154,68 @@ def create_onebot_v11_adapter(
             path=normalized_config.path,
             access_token=normalized_config.access_token,
         ),
-        raw_event_handler=None,
     )
+
+    adapter: OneBotV11Adapter | None = None
+
+    async def send_callable(
+        target: OneBotV11OutboundTarget,
+        payload: list[dict[str, object]],
+    ) -> dict[str, object]:
+        if adapter is None:
+            raise RuntimeError("Adapter not initialized")
+        return await adapter.send_to_target(target, payload)
+
+    llm_handler = LLMHandler(framework)
+
+    async def delete_callable(message_id: str) -> dict[str, object]:
+        if adapter is None:
+            raise RuntimeError("Adapter not initialized")
+        return await adapter.delete_message(message_id)
+
+    async def fetch_message_callable(message_id: str) -> dict[str, object]:
+        if adapter is None:
+            raise RuntimeError("Adapter not initialized")
+        return await adapter.call_api(
+            "get_msg",
+            {"message_id": int(message_id) if message_id.isdigit() else message_id},
+        )
+
+    async def fetch_forward_callable(forward_id: str) -> dict[str, object]:
+        if adapter is None:
+            raise RuntimeError("Adapter not initialized")
+        # Apifox: 支持 message_id 和 id 两个参数名，示例用 message_id
+        return await adapter.call_api("get_forward_msg", {"message_id": forward_id, "id": forward_id})
 
     dispatcher = OneBotV11Dispatcher(
         framework,
-        send_callable=lambda target, payload: adapter.send_to_target_from_payload(
-            target, payload
-        ),
+        send_callable=send_callable,
+        delete_callable=delete_callable,
+        fetch_message_callable=fetch_message_callable,
+        fetch_forward_callable=fetch_forward_callable,
         message_codec=message_codec,
+        llm_handler=llm_handler,
     )
 
     adapter = OneBotV11Adapter(
         normalized_config,
-        event_handler=event_handler,
-        transport=transport.call_api,
         parser=OneBotV11EventParser(),
         message_codec=message_codec,
         dispatcher=dispatcher,
         transport_runtime=transport,
+        configuration=configuration,
     )
 
     async def raw_event_handler(raw_event: ValueMap) -> None:
-        _ = await adapter.handle_raw_event(raw_event)
+        await adapter.handle_raw_event(raw_event)
 
     transport.raw_event_handler = cast(RawEventHandler, raw_event_handler)
+
+    logger.info(
+        "OneBot v11 adapter created: instance_uuid={} host={}:{}{} ",
+        normalized_config.instance_uuid,
+        normalized_config.host,
+        normalized_config.port,
+        normalized_config.path,
+    )
     return adapter

@@ -61,11 +61,21 @@ class ProviderSpec:
 
 
 @dataclass(frozen=True)
+class AgentToolSpec:
+    name: str
+    description: str = ""
+    parameters_schema: dict[str, Any] = field(default_factory=dict)
+    permissions: PermissionSpec | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RegisteredPlugin:
     plugin_class: type[Any]
     spec: PluginSpec
     commands: tuple[tuple[str, CommandSpec], ...] = ()
     event_handlers: tuple[tuple[str, EventHandlerSpec], ...] = ()
+    agent_tools: tuple[tuple[str, AgentToolSpec], ...] = ()
 
 
 @dataclass(frozen=True)

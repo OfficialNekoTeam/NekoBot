@@ -102,6 +102,7 @@ class ProviderRequest:
     prompt: str | None = None
     system_prompt: str | None = None
     messages: list[ChatMessage] = field(default_factory=list)
+    image_urls: list[str] = field(default_factory=list)
     tools: list[ToolDefinition] = field(default_factory=list)
     stream: bool = False
     options: ValueMap = field(default_factory=dict)

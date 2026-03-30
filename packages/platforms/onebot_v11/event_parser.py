@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import cast
 
+from loguru import logger
+
 from .types import (
     OneBotV11Event,
     OneBotV11EventType,
@@ -19,19 +21,20 @@ class OneBotV11EventParser:
         *,
         platform_instance_uuid: str,
     ) -> OneBotV11Event:
-        post_type = (
-            self._string(raw_event.get("post_type")) or OneBotV11EventType.MESSAGE
-        )
-        event_name = self._build_event_name(raw_event)
+        post_type = self._string(raw_event.get("post_type")) or "unknown"
         scene = self._resolve_scene(raw_event)
+        event_name = self._build_event_name(raw_event, scene)
         user_id = self._string(raw_event.get("user_id"))
         group_id = self._string(raw_event.get("group_id"))
         self_id = self._string(raw_event.get("self_id"))
         message_id = self._string(raw_event.get("message_id"))
         segments = self._parse_segments(raw_event.get("message"))
         plain_text = self._resolve_plain_text(raw_event, segments)
+        sender = self._parse_sender(raw_event.get("sender"))
+        if sender is None and user_id is not None:
+            sender = OneBotV11Sender(user_id=user_id)
 
-        return OneBotV11Event(
+        event = OneBotV11Event(
             event_type=post_type,
             event_name=event_name,
             scene=scene,
@@ -46,7 +49,7 @@ class OneBotV11EventParser:
             detail_type=self._resolve_detail_type(raw_event),
             time=self._integer(raw_event.get("time")),
             plain_text=plain_text,
-            sender=self._parse_sender(raw_event.get("sender")),
+            sender=sender,
             segments=segments,
             raw_event=dict(raw_event),
             metadata={
@@ -56,25 +59,54 @@ class OneBotV11EventParser:
                 "meta_event_type": self._string(raw_event.get("meta_event_type")),
             },
         )
-
-    def _build_event_name(self, raw_event: ValueMap) -> str:
-        post_type = self._string(raw_event.get("post_type")) or "message"
         if post_type == OneBotV11EventType.MESSAGE:
-            message_type = (
-                self._string(raw_event.get("message_type")) or OneBotV11Scene.PRIVATE
+            nickname = sender.nickname or sender.user_id if sender else user_id
+            content = plain_text or self._describe_segments(segments)
+            if event.scene == OneBotV11Scene.GROUP:
+                logger.info(
+                    "[OneBot] 收到群消息 | 群: {} | 用户: {}({}) | 内容: {}",
+                    group_id,
+                    nickname,
+                    user_id,
+                    content,
+                )
+            else:
+                logger.info(
+                    "[OneBot] 收到私聊消息 | 用户: {}({}) | 内容: {}",
+                    nickname,
+                    user_id,
+                    content,
+                )
+        else:
+            logger.debug(
+                "[OneBot] 收到事件: {} | scene={} chat_id={}",
+                event.event_name,
+                event.scene,
+                event.chat_id,
             )
-            return f"message.{message_type}"
+        return event
+
+    def _build_event_name(self, raw_event: ValueMap, scene: str) -> str:
+        post_type = self._string(raw_event.get("post_type")) or "unknown"
+        sub_type = self._string(raw_event.get("sub_type"))
+        if post_type == OneBotV11EventType.MESSAGE:
+            message_type = self._string(raw_event.get("message_type")) or scene
+            base = f"message.{message_type}"
+            return f"{base}.{sub_type}" if sub_type else base
         if post_type == OneBotV11EventType.NOTICE:
             notice_type = self._string(raw_event.get("notice_type")) or "unknown"
-            return f"notice.{notice_type}"
+            base = f"notice.{notice_type}"
+            return f"{base}.{sub_type}" if sub_type else base
         if post_type == OneBotV11EventType.REQUEST:
             request_type = self._string(raw_event.get("request_type")) or "unknown"
-            return f"request.{request_type}"
+            base = f"request.{request_type}"
+            return f"{base}.{sub_type}" if sub_type else base
         if post_type == OneBotV11EventType.META_EVENT:
             meta_event_type = (
                 self._string(raw_event.get("meta_event_type")) or "unknown"
             )
-            return f"meta_event.{meta_event_type}"
+            base = f"meta_event.{meta_event_type}"
+            return f"{base}.{sub_type}" if sub_type else base
         return post_type
 
     def _resolve_scene(self, raw_event: ValueMap) -> str:
@@ -82,6 +114,10 @@ class OneBotV11EventParser:
         if message_type == OneBotV11Scene.GROUP:
             return OneBotV11Scene.GROUP
         if message_type == OneBotV11Scene.PRIVATE:
+            return OneBotV11Scene.PRIVATE
+        if self._string(raw_event.get("group_id")) is not None:
+            return OneBotV11Scene.GROUP
+        if self._string(raw_event.get("user_id")) is not None:
             return OneBotV11Scene.PRIVATE
         post_type = self._string(raw_event.get("post_type"))
         if post_type == OneBotV11EventType.META_EVENT:
@@ -126,6 +162,11 @@ class OneBotV11EventParser:
         )
 
     def _parse_segments(self, raw_message: object) -> list[OneBotV11MessageSegment]:
+        if isinstance(raw_message, str):
+            text = raw_message.strip()
+            if not text:
+                return []
+            return [OneBotV11MessageSegment(type="text", data={"text": text})]
         if not isinstance(raw_message, list):
             return []
 
@@ -149,20 +190,58 @@ class OneBotV11EventParser:
         raw_event: ValueMap,
         segments: list[OneBotV11MessageSegment],
     ) -> str | None:
-        raw_message = raw_event.get("raw_message")
-        if isinstance(raw_message, str):
-            stripped = raw_message.strip()
-            return stripped or None
+        # 如果 message 是字符串格式（非 array），直接用 raw_message
+        message = raw_event.get("message")
+        if isinstance(message, str):
+            raw = raw_event.get("raw_message")
+            src = raw if isinstance(raw, str) else message
+            return src.strip() or None
 
+        # array 格式：只取 text 类型 segment，忽略 CQ 码
         text_parts: list[str] = []
         for segment in segments:
             if segment.type == "text":
                 text = segment.data.get("text")
                 if isinstance(text, str) and text:
                     text_parts.append(text)
-        if not text_parts:
-            return None
         return "".join(text_parts).strip() or None
+
+    def _describe_segments(self, segments: list[OneBotV11MessageSegment]) -> str:
+        _LABELS: dict[str, str] = {
+            "image": "[图片]",
+            "video": "[视频]",
+            "record": "[语音]",
+            "file": "[文件]",
+            "face": "[表情]",
+            "mface": "[商城表情]",
+            "at": "[at]",
+            "reply": "[回复]",
+            "forward": "[合并转发]",
+            "json": "[卡片]",
+            "xml": "[XML]",
+            "poke": "[戳一戳]",
+            "location": "[位置]",
+            "contact": "[名片]",
+            "markdown": "[Markdown]",
+            "miniapp": "[小程序]",
+        }
+        parts: list[str] = []
+        for seg in segments:
+            if seg.type == "text":
+                text = seg.data.get("text", "")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+            elif seg.type == "mface":
+                summary = seg.data.get("summary", "")
+                parts.append(
+                    summary if isinstance(summary, str) and summary else "[商城表情]"
+                )
+            elif seg.type == "at":
+                qq = seg.data.get("qq", "")
+                parts.append(f"[@{qq}]")
+            else:
+                parts.append(_LABELS.get(seg.type, f"[{seg.type}]"))
+        return " ".join(parts) if parts else "[空消息]"
 
     def _string(self, value: object) -> str | None:
         if isinstance(value, str):

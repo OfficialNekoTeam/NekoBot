@@ -19,6 +19,12 @@ class RuntimeRegistry:
             raise ValueError(f"plugin already registered: {name}")
         self.plugins[name] = registered_plugin
 
+    def unregister_plugin(self, plugin_name: str) -> bool:
+        if plugin_name not in self.plugins:
+            return False
+        del self.plugins[plugin_name]
+        return True
+
     def register_provider(self, registered_provider: RegisteredProvider) -> None:
         name = registered_provider.spec.name
         if name in self.providers:

@@ -29,14 +29,14 @@ def test_parse_group_message_event_normalizes_core_fields() -> None:
     event = parser.parse(cast(ValueMap, raw_event), platform_instance_uuid="instance-1")
 
     assert event.event_type == "message"
-    assert event.event_name == "message.group"
+    assert event.event_name == "message.group.normal"
     assert event.scene == OneBotV11Scene.GROUP
     assert event.platform_instance_uuid == "instance-1"
     assert event.user_id == "20002"
     assert event.group_id == "30003"
     assert event.chat_id == "30003"
     assert event.message_id == "40004"
-    assert event.plain_text == "hello @bot"
+    assert event.plain_text == "hello"
     assert event.sender is not None
     assert event.sender.nickname == "tester"
     assert event.segments[0].type == OneBotV11SegmentType.TEXT
@@ -59,6 +59,43 @@ def test_parse_private_message_falls_back_to_text_from_segments() -> None:
     assert event.plain_text == "hello world"
 
 
+def test_parse_private_friend_message_keeps_concrete_event_name() -> None:
+    parser = OneBotV11EventParser()
+    raw_event = {
+        "post_type": "message",
+        "message_type": "private",
+        "sub_type": "friend",
+        "user_id": 20001,
+        "message": "hello friend",
+    }
+
+    event = parser.parse(cast(ValueMap, raw_event), platform_instance_uuid="instance-1")
+
+    assert event.scene == OneBotV11Scene.PRIVATE
+    assert event.event_name == "message.private.friend"
+    assert event.chat_id == "20001"
+    assert event.plain_text == "hello friend"
+
+
+def test_parse_group_message_without_message_type_falls_back_from_group_id() -> None:
+    parser = OneBotV11EventParser()
+    raw_event = {
+        "post_type": "message",
+        "group_id": 30003,
+        "user_id": 20002,
+        "message": "hello group",
+    }
+
+    event = parser.parse(cast(ValueMap, raw_event), platform_instance_uuid="instance-1")
+
+    assert event.scene == OneBotV11Scene.GROUP
+    assert event.event_name == "message.group"
+    assert event.chat_id == "30003"
+    assert event.plain_text == "hello group"
+    assert event.segments[0].type == OneBotV11SegmentType.TEXT
+    assert event.segments[0].data == {"text": "hello group"}
+
+
 def test_parse_notice_request_and_meta_events_have_expected_names() -> None:
     parser = OneBotV11EventParser()
 
@@ -79,3 +116,21 @@ def test_parse_notice_request_and_meta_events_have_expected_names() -> None:
     assert request.event_name == "request.friend"
     assert meta.event_name == "meta_event.heartbeat"
     assert meta.scene == OneBotV11Scene.SYSTEM
+
+
+def test_parse_notice_event_includes_subtype_when_present() -> None:
+    parser = OneBotV11EventParser()
+
+    notice = parser.parse(
+        cast(
+            ValueMap,
+            {
+                "post_type": "notice",
+                "notice_type": "notify",
+                "sub_type": "poke",
+            },
+        ),
+        platform_instance_uuid="instance-1",
+    )
+
+    assert notice.event_name == "notice.notify.poke"

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from types import ModuleType
 from typing import cast
 
 from ..contracts import RegisteredPlugin, RegisteredProvider
 from ..contracts.specs import (
+    AgentToolSpec,
     CommandSpec,
     EventHandlerSpec,
     PermissionSpec,
@@ -14,6 +16,7 @@ from ..contracts.specs import (
     SchemaRef,
 )
 from ..decorators.core import (
+    AGENT_TOOL_SPEC_ATTR,
     COMMAND_SPEC_ATTR,
     CONFIG_SCHEMA_ATTR,
     EVENT_HANDLER_SPEC_ATTR,
@@ -21,12 +24,17 @@ from ..decorators.core import (
     PLUGIN_SPEC_ATTR,
     PROVIDER_SPEC_ATTR,
 )
+from .dispatch_registry import CommandRegistry, EventHandlerRegistry
 from .registry import RuntimeRegistry
 
 
 class FrameworkBinder:
     def __init__(self, registry: RuntimeRegistry) -> None:
         self.registry: RuntimeRegistry = registry
+        # 延迟引入避免循环依赖，由 NekoBotFramework 在初始化后注入
+        self._tool_registry: object | None = None
+        self._command_registry: CommandRegistry | None = None
+        self._event_handler_registry: EventHandlerRegistry | None = None
 
     def bind_plugin_class(self, plugin_class: type[object]) -> RegisteredPlugin:
         plugin_spec = cast(object, getattr(plugin_class, PLUGIN_SPEC_ATTR, None))
@@ -62,6 +70,7 @@ class FrameworkBinder:
 
         commands: list[tuple[str, CommandSpec]] = []
         event_handlers: list[tuple[str, EventHandlerSpec]] = []
+        agent_tools: list[tuple[str, AgentToolSpec]] = []
 
         members = cast(list[tuple[str, object]], inspect.getmembers(plugin_class))
         for member_name, member in members:
@@ -96,13 +105,40 @@ class FrameworkBinder:
                     )
                 event_handlers.append((member_name, typed_event_spec))
 
+            agent_tool_spec = cast(object, getattr(member, AGENT_TOOL_SPEC_ATTR, None))
+            if agent_tool_spec is not None:
+                agent_tools.append((member_name, cast(AgentToolSpec, agent_tool_spec)))
+
         registered = RegisteredPlugin(
             plugin_class=plugin_class,
             spec=plugin_spec,
             commands=tuple(commands),
             event_handlers=tuple(event_handlers),
+            agent_tools=tuple(agent_tools),
         )
         self.registry.register_plugin(registered)
+
+        # 注册命令 / 事件到分发注册表
+        if self._command_registry is not None and registered.commands:
+            self._command_registry.register(plugin_spec.name, registered.commands)
+        if self._event_handler_registry is not None and registered.event_handlers:
+            self._event_handler_registry.register(plugin_spec.name, registered.event_handlers)
+
+        # 注册 agent tools 到 ToolRegistry（如果已挂载）
+        if self._tool_registry is not None:
+            from ..tools.registry import ToolRegistry
+            tr = cast(ToolRegistry, self._tool_registry)
+            for method_name, tool_spec in registered.agent_tools:
+                unbound = getattr(plugin_class, method_name, None)
+                if callable(unbound):
+                    tr.register_tool(
+                        plugin_name=plugin_spec.name,
+                        tool_name=tool_spec.name,
+                        description=tool_spec.description,
+                        parameters_schema=dict(tool_spec.parameters_schema),
+                        handler=cast(Callable[..., object], unbound),
+                    )
+
         return registered
 
     def bind_provider_class(self, provider_class: type[object]) -> RegisteredProvider:

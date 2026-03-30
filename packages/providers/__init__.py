@@ -6,6 +6,7 @@ from .base import (
     STTProvider,
     TTSProvider,
 )
+from .models_dev import ModelsDevModel, ModelsDevProvider, ModelsDevRegistry, get_models_dev_registry
 from .registry import ProviderRegistry
 from .types import (
     ChatMessage,
@@ -32,6 +33,10 @@ from .types import (
 
 __all__ = [
     "BaseProvider",
+    "ModelsDevModel",
+    "ModelsDevProvider",
+    "ModelsDevRegistry",
+    "get_models_dev_registry",
     "ChatMessage",
     "ChatProvider",
     "EmbeddingProvider",

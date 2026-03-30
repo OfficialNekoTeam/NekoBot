@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import cast
+from typing import cast, override
 
 from packages.app import NekoBotFramework
-from packages.contracts.specs import EventHandlerSpec, PluginSpec, RegisteredPlugin
+from packages.contracts.specs import (
+    EventHandlerSpec,
+    PluginSpec,
+    ProviderSpec,
+    RegisteredPlugin,
+    RegisteredProvider,
+)
 from packages.platforms.onebot_v11.dispatch import OneBotV11Dispatcher
 from packages.platforms.onebot_v11.message_codec import OneBotV11MessageCodec
 from packages.platforms.onebot_v11.types import (
@@ -12,7 +18,9 @@ from packages.platforms.onebot_v11.types import (
     OneBotV11OutboundTarget,
     OneBotV11Scene,
 )
-from packages.providers.types import ValueMap
+from packages.llm.handler import LLMHandler
+from packages.providers.base import ChatProvider
+from packages.providers.types import ProviderRequest, ProviderResponse, ValueMap
 from packages.runtime.context import PluginContext
 from packages.schema import SchemaRegistry
 
@@ -42,6 +50,34 @@ class FakePlugin:
 
     async def on_event(self, event_name: str, payload: dict[str, object]) -> None:
         _ = event_name, payload
+
+
+class PrivatePlugin(FakePlugin):
+    async def on_message_private(self, payload: dict[str, object]) -> None:
+        recorder = type(self).recorder
+        if recorder is not None:
+            recorder.payloads.append(payload)
+
+
+class NoticePlugin(FakePlugin):
+    async def on_notice_notify(self, payload: dict[str, object]) -> None:
+        recorder = type(self).recorder
+        if recorder is not None:
+            recorder.payloads.append(payload)
+
+
+class FakeChatProvider(ChatProvider):
+    @override
+    @classmethod
+    def provider_spec(cls) -> ProviderSpec:
+        return ProviderSpec(name="fake-chat", kind="chat", capabilities=("chat",))
+
+    @override
+    async def generate(self, request: ProviderRequest) -> ProviderResponse:
+        last = (
+            request.messages[-1].content if request.messages else (request.prompt or "")
+        )
+        return ProviderResponse(content=f"echo:{last}")
 
 
 async def test_dispatch_builds_contexts_and_routes_reply() -> None:
@@ -97,4 +133,185 @@ async def test_dispatch_builds_contexts_and_routes_reply() -> None:
     assert segments[0] == cast(
         ValueMap,
         {"type": "text", "data": {"text": "pong"}},
+    )
+
+
+async def test_dispatch_generic_group_handler_matches_concrete_group_event() -> None:
+    framework = NekoBotFramework()
+    recorder = Recorder()
+    FakePlugin.recorder = recorder
+    framework.runtime_registry.register_plugin(
+        RegisteredPlugin(
+            plugin_class=FakePlugin,
+            spec=PluginSpec(name="demo-plugin"),
+            event_handlers=(
+                ("on_message_group", EventHandlerSpec(event="message.group")),
+            ),
+        )
+    )
+
+    async def send_callable(
+        target: OneBotV11OutboundTarget,
+        segments: list[dict[str, object]],
+    ) -> dict[str, object]:
+        _ = target, segments
+        return {"status": "ok"}
+
+    dispatcher = OneBotV11Dispatcher(
+        framework,
+        send_callable=send_callable,
+        message_codec=OneBotV11MessageCodec(),
+    )
+    event = OneBotV11Event(
+        event_type="message",
+        event_name="message.group.normal",
+        scene=OneBotV11Scene.GROUP,
+        platform_instance_uuid="instance-1",
+        user_id="user-1",
+        group_id="group-42",
+        chat_id="group-42",
+        message_id="msg-1",
+        plain_text="hello",
+    )
+
+    contexts = await dispatcher.dispatch_event(event)
+
+    assert len(contexts) == 1
+    assert recorder.payloads[0]["event_name"] == "message.group.normal"
+
+
+async def test_dispatch_generic_private_handler_matches_concrete_private_event() -> (
+    None
+):
+    framework = NekoBotFramework()
+    recorder = Recorder()
+    PrivatePlugin.recorder = recorder
+    framework.runtime_registry.register_plugin(
+        RegisteredPlugin(
+            plugin_class=PrivatePlugin,
+            spec=PluginSpec(name="private-plugin"),
+            event_handlers=(
+                ("on_message_private", EventHandlerSpec(event="message.private")),
+            ),
+        )
+    )
+
+    async def send_callable(
+        target: OneBotV11OutboundTarget,
+        segments: list[dict[str, object]],
+    ) -> dict[str, object]:
+        _ = target, segments
+        return {"status": "ok"}
+
+    dispatcher = OneBotV11Dispatcher(
+        framework,
+        send_callable=send_callable,
+        message_codec=OneBotV11MessageCodec(),
+    )
+    event = OneBotV11Event(
+        event_type="message",
+        event_name="message.private.friend",
+        scene=OneBotV11Scene.PRIVATE,
+        platform_instance_uuid="instance-1",
+        user_id="user-1",
+        chat_id="user-1",
+        message_id="msg-1",
+        plain_text="hello",
+    )
+
+    contexts = await dispatcher.dispatch_event(event)
+
+    assert len(contexts) == 1
+    assert recorder.payloads[0]["event_name"] == "message.private.friend"
+
+
+async def test_dispatch_generic_notice_handler_matches_concrete_notice_event() -> None:
+    framework = NekoBotFramework()
+    recorder = Recorder()
+    NoticePlugin.recorder = recorder
+    framework.runtime_registry.register_plugin(
+        RegisteredPlugin(
+            plugin_class=NoticePlugin,
+            spec=PluginSpec(name="notice-plugin"),
+            event_handlers=(
+                ("on_notice_notify", EventHandlerSpec(event="notice.notify")),
+            ),
+        )
+    )
+
+    async def send_callable(
+        target: OneBotV11OutboundTarget,
+        segments: list[dict[str, object]],
+    ) -> dict[str, object]:
+        _ = target, segments
+        return {"status": "ok"}
+
+    dispatcher = OneBotV11Dispatcher(
+        framework,
+        send_callable=send_callable,
+        message_codec=OneBotV11MessageCodec(),
+    )
+    event = OneBotV11Event(
+        event_type="notice",
+        event_name="notice.notify.poke",
+        scene=OneBotV11Scene.PRIVATE,
+        platform_instance_uuid="instance-1",
+        user_id="user-1",
+        chat_id="user-1",
+    )
+
+    contexts = await dispatcher.dispatch_event(event)
+
+    assert len(contexts) == 1
+    assert recorder.payloads[0]["event_name"] == "notice.notify.poke"
+
+
+async def test_dispatch_llm_handler_replies_on_private_message() -> None:
+    framework = NekoBotFramework()
+    framework.runtime_registry.register_provider(
+        RegisteredProvider(
+            provider_class=FakeChatProvider,
+            spec=FakeChatProvider.provider_spec(),
+        )
+    )
+    configuration = framework.build_configuration_context(
+        framework_config={"default_provider": "fake-chat"}
+    )
+
+    sent: list[tuple[OneBotV11OutboundTarget, list[dict[str, object]]]] = []
+
+    async def send_callable(
+        target: OneBotV11OutboundTarget,
+        segments: list[dict[str, object]],
+    ) -> dict[str, object]:
+        sent.append((target, segments))
+        return {"status": "ok", "data": {"message_id": 99}}
+
+    llm_handler = LLMHandler(framework)
+    dispatcher = OneBotV11Dispatcher(
+        framework,
+        send_callable=send_callable,
+        message_codec=OneBotV11MessageCodec(),
+        llm_handler=llm_handler,
+    )
+    event = OneBotV11Event(
+        event_type="message",
+        event_name="message.private",
+        scene=OneBotV11Scene.PRIVATE,
+        platform_instance_uuid="instance-1",
+        user_id="user-1",
+        chat_id="user-1",
+        message_id="msg-2",
+        plain_text="hello llm",
+    )
+
+    contexts = await dispatcher.dispatch_event(event, configuration)
+
+    assert len(contexts) == 0  # no plugins, just LLM handler
+    assert len(sent) == 1
+    target, segments = sent[0]
+    assert target.user_id == "user-1"
+    assert segments[0] == cast(
+        ValueMap,
+        {"type": "text", "data": {"text": "echo:hello llm"}},
     )

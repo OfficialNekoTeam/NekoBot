@@ -16,14 +16,28 @@ from ..permissions.constants import ScopeName
 
 ValueMap: TypeAlias = dict[str, object]
 
-ReplyCallable = Callable[[str], Awaitable[None]]
+ReplyCallable = Callable[[str], Awaitable[str | None]]  # returns message_id or None
+RecallCallable = Callable[[str], Awaitable[None]]        # takes message_id
+SendVoiceCallable = Callable[[bytes, str], Awaitable[str | None]]  # (audio_bytes, mime) -> message_id
 ProviderCallable = Callable[..., Awaitable[object]]
 TaskCallable = Callable[[str, ValueMap], Awaitable[object]]
 PermissionCallable = Callable[[tuple[str, ...], bool], PermissionDecision]
+SaveConversationCallable = Callable[[ConversationContext], ConversationContext]
+LoadConversationCallable = Callable[[str], ConversationContext | None]
 
 
-async def _noop_reply(message: str) -> None:
+async def _noop_reply(message: str) -> str | None:
     _ = message
+    return None
+
+
+async def _noop_recall(message_id: str) -> None:
+    _ = message_id
+    return None
+
+
+async def _noop_send_voice(audio_bytes: bytes, mime_type: str) -> str | None:
+    _ = audio_bytes, mime_type
     return None
 
 
@@ -44,10 +58,23 @@ def _allow_all_permissions(
     return PermissionDecision(allowed=True, reason="default allow")
 
 
+def _noop_save_conversation(context: ConversationContext) -> ConversationContext:
+    return context
+
+
+def _noop_load_conversation(key: str) -> ConversationContext | None:
+    _ = key
+    return None
+
+
 DEFAULT_REPLY_CALLABLE: ReplyCallable = _noop_reply
+DEFAULT_RECALL_CALLABLE: RecallCallable = _noop_recall
+DEFAULT_SEND_VOICE_CALLABLE: SendVoiceCallable = _noop_send_voice
 DEFAULT_PROVIDER_CALLABLE: ProviderCallable = _missing_provider
 DEFAULT_TASK_CALLABLE: TaskCallable = _missing_task
 DEFAULT_PERMISSION_CALLABLE: PermissionCallable = _allow_all_permissions
+DEFAULT_SAVE_CONVERSATION_CALLABLE: SaveConversationCallable = _noop_save_conversation
+DEFAULT_LOAD_CONVERSATION_CALLABLE: LoadConversationCallable = _noop_load_conversation
 
 
 @dataclass(slots=True)
@@ -98,9 +125,17 @@ class PluginContext:
     configuration: ConfigurationContext = field(default_factory=ConfigurationContext)
     conversation: ConversationContext | None = None
     reply_callable: ReplyCallable = DEFAULT_REPLY_CALLABLE
+    recall_callable: RecallCallable = DEFAULT_RECALL_CALLABLE
+    send_voice_callable: SendVoiceCallable = DEFAULT_SEND_VOICE_CALLABLE
     provider_callable: ProviderCallable = DEFAULT_PROVIDER_CALLABLE
     task_callable: TaskCallable = DEFAULT_TASK_CALLABLE
     permission_callable: PermissionCallable = DEFAULT_PERMISSION_CALLABLE
+    save_conversation_callable: SaveConversationCallable = (
+        DEFAULT_SAVE_CONVERSATION_CALLABLE
+    )
+    load_conversation_callable: LoadConversationCallable = (
+        DEFAULT_LOAD_CONVERSATION_CALLABLE
+    )
     permission_engine: PermissionEngine | None = None
     resource_kind: str = "plugin"
 
@@ -108,8 +143,53 @@ class PluginContext:
         if not self.config:
             self.config = self.configuration.get_plugin_config(self.plugin_name)
 
-    async def reply(self, message: str) -> None:
-        await self.reply_callable(message)
+    async def reply(self, message: str) -> str | None:
+        return await self.reply_callable(message)
+
+    async def recall(self, message_id: str) -> None:
+        await self.recall_callable(message_id)
+
+    async def send_voice(self, audio_bytes: bytes, mime_type: str = "audio/mpeg") -> str | None:
+        """发送语音消息，audio_bytes 为音频二进制，返回 message_id 或 None。"""
+        return await self.send_voice_callable(audio_bytes, mime_type)
+
+    async def tts(self, text: str, *, provider_name: str, voice: str | None = None, model: str | None = None) -> bytes | None:
+        """调用 TTS provider 合成语音，返回音频二进制（mp3）。失败返回 None。"""
+        from ..providers.types import TTSRequest, TTSResponse
+        try:
+            result = await self.provider_callable(
+                provider_name=provider_name,
+                request=TTSRequest(text=text, voice=voice, model=model),
+            )
+            if isinstance(result, TTSResponse):
+                if result.error:
+                    return None
+                return result.audio_bytes or None
+        except Exception:
+            return None
+        return None
+
+    async def stt(self, audio_bytes: bytes, mime_type: str = "audio/mpeg", *, provider_name: str, model: str | None = None) -> str | None:
+        """调用 STT provider 转写语音，返回文字。失败返回 None。"""
+        from ..providers.types import STTRequest, STTResponse
+        try:
+            result = await self.provider_callable(
+                provider_name=provider_name,
+                request=STTRequest(audio_bytes=audio_bytes, mime_type=mime_type, model=model),
+            )
+            if isinstance(result, STTResponse):
+                if result.error:
+                    return None
+                return result.text or None
+        except Exception:
+            return None
+        return None
+
+    def save_conversation(self, context: ConversationContext) -> ConversationContext:
+        return self.save_conversation_callable(context)
+
+    def load_conversation(self, key: str) -> ConversationContext | None:
+        return self.load_conversation_callable(key)
 
     async def request_provider(self, provider_name: str, **kwargs: object) -> object:
         return await self.provider_callable(provider_name=provider_name, **kwargs)

@@ -64,6 +64,13 @@ class OneBotV11MessageCodec:
             data={"file": file},
         )
 
+    def record(self, file: str) -> OneBotV11MessageSegment:
+        """语音消息 segment。file 可为 URL、本地路径或 base64://... 格式。"""
+        return OneBotV11MessageSegment(
+            type="record",
+            data={"file": file},
+        )
+
     def _encode_segment(
         self, segment: OneBotV11MessageSegment
     ) -> dict[str, object] | None:

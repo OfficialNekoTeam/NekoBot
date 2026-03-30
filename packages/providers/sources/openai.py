@@ -232,6 +232,28 @@ class OpenAIChatProvider(ChatProvider):
             if message.name:
                 payload["name"] = message.name
             messages.append(cast(ChatCompletionMessageParam, cast(object, payload)))
+
+        # If image_urls present, transform the last user message into multimodal content
+        if request.image_urls and messages:
+            for i in range(len(messages) - 1, -1, -1):
+                msg = messages[i]
+                if not isinstance(msg, dict):
+                    continue
+                if cast(dict[object, object], msg).get("role") == "user":
+                    text_content = cast(dict[object, object], msg).get("content", "")
+                    content_parts: list[dict[str, object]] = []
+                    if text_content:
+                        content_parts.append({"type": "text", "text": str(text_content)})
+                    for url in request.image_urls:
+                        content_parts.append(
+                            {"type": "image_url", "image_url": {"url": url}}
+                        )
+                    messages[i] = cast(
+                        ChatCompletionMessageParam,
+                        cast(object, {"role": "user", "content": content_parts}),
+                    )
+                    break
+
         return messages
 
     def _build_tools(

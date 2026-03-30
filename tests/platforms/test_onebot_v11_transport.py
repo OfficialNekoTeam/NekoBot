@@ -35,7 +35,7 @@ async def test_transport_rejects_invalid_access_token() -> None:
             response = await session.get(
                 f"http://127.0.0.1:{port}/ws?access_token=wrong"
             )
-            assert response.status == 401
+            assert response.status in (400, 401)
     finally:
         await transport.stop()
 

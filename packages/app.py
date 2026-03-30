@@ -34,10 +34,11 @@ from .providers.types import (
     TTSRequest,
     ValueMap,
 )
-from .runtime import FrameworkBinder, RuntimeRegistry
+from .runtime import CommandRegistry, EventHandlerRegistry, FrameworkBinder, RuntimeRegistry
 from .runtime import context as runtime_context
 from .runtime.context import ExecutionContext, PluginContext
 from .schema import ObjectSchema, SchemaRegistry
+from .tools import ToolRegistry
 
 
 class NekoBotFramework:
@@ -57,6 +58,17 @@ class NekoBotFramework:
             runtime_registry=self.runtime_registry,
             schema_registry=self.schema_registry,
         )
+        # 权限引擎和 owner ID 集合，由 bootstrap 注入
+        self.permission_engine: PermissionEngine | None = None
+        self.owner_ids: frozenset[str] = frozenset()
+        # Agent 工具注册表
+        self.tool_registry: ToolRegistry = ToolRegistry()
+        self.binder._tool_registry = self.tool_registry
+        # 命令 / 事件分发注册表
+        self.command_registry: CommandRegistry = CommandRegistry()
+        self.event_handler_registry: EventHandlerRegistry = EventHandlerRegistry()
+        self.binder._command_registry = self.command_registry
+        self.binder._event_handler_registry = self.event_handler_registry
 
     def register_schema(self, name: str, schema: ObjectSchema) -> None:
         self.runtime_registry.register_schema(name, schema)
@@ -320,12 +332,18 @@ class NekoBotFramework:
         permission_engine = (
             permission_engine_value
             if isinstance(permission_engine_value, PermissionEngine)
-            else None
+            else self.permission_engine  # 使用 framework 级别的默认引擎
         )
         reply_callable_value = kwargs.get("reply_callable")
         reply_callable = (
             cast(runtime_context.ReplyCallable, reply_callable_value)
             if callable(reply_callable_value)
+            else None
+        )
+        send_voice_callable_value = kwargs.get("send_voice_callable")
+        send_voice_callable = (
+            cast(runtime_context.SendVoiceCallable, send_voice_callable_value)
+            if callable(send_voice_callable_value)
             else None
         )
         task_callable_value = kwargs.get("task_callable")
@@ -364,11 +382,14 @@ class NekoBotFramework:
             configuration=configuration,
             conversation=conversation,
             reply_callable=reply_callable or runtime_context.DEFAULT_REPLY_CALLABLE,
+            send_voice_callable=send_voice_callable or runtime_context.DEFAULT_SEND_VOICE_CALLABLE,
             provider_callable=provider_callable,
             task_callable=task_callable or runtime_context.DEFAULT_TASK_CALLABLE,
             permission_callable=(
                 permission_callable or runtime_context.DEFAULT_PERMISSION_CALLABLE
             ),
+            save_conversation_callable=self.save_conversation_context,
+            load_conversation_callable=self.conversation_store.get_conversation,
             permission_engine=permission_engine,
             resource_kind=resource_kind,
         )
@@ -554,9 +575,11 @@ class NekoBotFramework:
         system_prompt = kwargs.pop("system_prompt", None)
         messages_value = kwargs.pop("messages", [])
         tools_value = kwargs.pop("tools", [])
+        image_urls_value = kwargs.pop("image_urls", [])
         stream_value = kwargs.pop("stream", False)
         messages = self._coerce_chat_messages(messages_value)
         tools = self._coerce_tool_definitions(tools_value)
+        image_urls = [u for u in image_urls_value if isinstance(u, str)] if isinstance(image_urls_value, list) else []
 
         return ProviderRequest(
             model=model,
@@ -567,6 +590,7 @@ class NekoBotFramework:
                 else None
             ),
             messages=messages,
+            image_urls=image_urls,
             tools=tools,
             stream=bool(stream_value),
             options={"provider_name": provider_name, **kwargs},

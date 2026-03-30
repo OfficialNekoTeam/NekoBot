@@ -1,4 +1,5 @@
 from .specs import (
+    AgentToolSpec,
     CommandSpec,
     ConfigSchemaSpec,
     EventHandlerSpec,
@@ -11,6 +12,7 @@ from .specs import (
 )
 
 __all__ = [
+    "AgentToolSpec",
     "CommandSpec",
     "ConfigSchemaSpec",
     "EventHandlerSpec",

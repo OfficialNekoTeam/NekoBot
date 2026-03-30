@@ -1,4 +1,5 @@
 from .core import (
+    agent_tool,
     command,
     config_schema,
     event_handler,
@@ -8,6 +9,7 @@ from .core import (
 )
 
 __all__ = [
+    "agent_tool",
     "command",
     "config_schema",
     "event_handler",
