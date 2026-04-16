@@ -1,9 +1,13 @@
 [project]
 name = "nekobot"
 version = "0.1.0"
-description = "Add your description here"
+description = "多平台 AI 机器人框架"
 readme = "README.md"
+license = "AGPL-3.0"
 requires-python = ">=3.13"
+authors = [
+    { name = "初然Neko", email = "churanneko@outlook.com" },
+]
 dependencies = [
     "aiohttp>=3.13.3",
     "anthropic>=0.86.0",
