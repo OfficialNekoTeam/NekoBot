@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING
 import aiohttp
 from loguru import logger
 
-from ..utils.url_guard import is_safe_url
 from ..conversations.context import ConfigurationContext, ConversationContext
 from ..conversations.models import ConversationKey, IsolationMode
 from ..providers.types import ProviderResponse
 from ..runtime.context import ExecutionContext
+from ..utils.url_guard import is_safe_url
 
 if TYPE_CHECKING:
     from ..app import NekoBotFramework

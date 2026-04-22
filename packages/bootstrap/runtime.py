@@ -1,6 +1,6 @@
 from __future__ import annotations
-import json
 
+import json
 from dataclasses import dataclass
 
 from loguru import logger
@@ -12,7 +12,6 @@ from ..permissions.models import PermissionRule
 from ..platforms.bootstrap import PlatformBootstrap, RunningPlatformInstance
 from ..platforms.registry import PlatformRegistry
 from ..plugins.reloader import PluginReloader
-from ..tools.mcp.types import MCPServerConfig
 from ..providers.sources import (
     ANTHROPIC_PROVIDER_SCHEMA,
     EDGE_TTS_SCHEMA,
@@ -29,6 +28,7 @@ from ..providers.sources import (
     OpenAISTTProvider,
     OpenAITTSProvider,
 )
+from ..tools.mcp.types import MCPServerConfig
 from .config import BootstrapConfig, normalize_app_config
 
 

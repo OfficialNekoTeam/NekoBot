@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import cast
 
-import pytest
 from anthropic.types import TextBlock, ToolUseBlock
 from google.genai import types
 

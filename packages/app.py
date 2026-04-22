@@ -47,9 +47,9 @@ from .runtime import (
 from .runtime import context as runtime_context
 from .runtime.context import ExecutionContext, PluginContext
 from .schema import ObjectSchema, SchemaRegistry
+from .skills.manager import SkillManager
 from .tools import ToolRegistry
 from .tools.mcp.manager import MCPManager
-from .skills.manager import SkillManager
 
 
 class NekoBotFramework:
