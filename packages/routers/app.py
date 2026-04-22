@@ -1,31 +1,52 @@
 from __future__ import annotations
 
 import importlib
+import os
 import pkgutil
 from quart import Quart, request, Response, Blueprint
 
 from ..app import NekoBotFramework
 from . import routes
 
+
+def _allowed_origins() -> frozenset[str]:
+    """Read comma-separated allowed origins from NEKOBOT_CORS_ORIGINS env var."""
+    raw = os.environ.get("NEKOBOT_CORS_ORIGINS", "").strip()
+    if not raw:
+        return frozenset()
+    return frozenset(o.strip() for o in raw.split(",") if o.strip())
+
+
+_CORS_ORIGINS: frozenset[str] = _allowed_origins()
+
+
 def create_app(framework: NekoBotFramework) -> Quart:
     """创建并配置 Quart 实例，接入核心框架依赖。"""
     app = Quart(__name__)
-    
-    # 简单的 CORS 设置
+
     @app.after_request
     async def add_cors_headers(response: Response) -> Response:
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        if not _CORS_ORIGINS:
+            return response
+        origin = request.headers.get("Origin", "")
+        if origin in _CORS_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            response.headers["Vary"] = "Origin"
         return response
 
     @app.route("/", defaults={"path": ""}, methods=["OPTIONS"])
     @app.route("/<path:path>", methods=["OPTIONS"])
     async def cors_preflight(path: str) -> Response:
+        origin = request.headers.get("Origin", "")
+        if origin not in _CORS_ORIGINS:
+            return Response("", status=403)
         return Response("", status=204, headers={
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Vary": "Origin",
         })
 
     # 注入框架实例

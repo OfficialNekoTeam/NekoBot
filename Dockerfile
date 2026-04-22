@@ -40,7 +40,7 @@ EXPOSE 6285
 
 # 设置健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:6285/health || exit 1
+    CMD curl -f http://localhost:6285/api/ping || exit 1
 
 # 启动应用
 CMD ["python", "main.py"]

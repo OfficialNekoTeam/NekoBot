@@ -67,8 +67,8 @@ INITIAL_CONFIG_TEMPLATE: dict[str, Any] = {
     "platforms": [
         {
             "type": "onebot_v11",
-            "id": "qq_bot_1",
-            "enable": True,
+            "instance_uuid": "qq_bot_1",
+            "enabled": True,
             "host": "127.0.0.1",
             "port": 6700,
             "protocol": "ws_reverse"
