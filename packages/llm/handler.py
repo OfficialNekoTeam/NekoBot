@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING
 import aiohttp
 from loguru import logger
 
-from ..utils.url_guard import is_safe_url
 from ..conversations.context import ConfigurationContext, ConversationContext
 from ..conversations.models import ConversationKey, IsolationMode
 from ..providers.types import ProviderResponse
 from ..runtime.context import ExecutionContext
+from ..utils.url_guard import is_safe_url
 
 if TYPE_CHECKING:
     from ..app import NekoBotFramework
@@ -816,7 +816,8 @@ class LLMHandler:
         skills = self.framework.skill_manager.skill_descriptions
         if skills:
             skill_lines = [f"- {s['name']}: {s['description']}" for s in skills]
-            extra_parts.append("[可用技能列表]\n" + "\n".join(skill_lines) + "\n(如需执行上述技能，请先调用 view_skill 工具查看详细指令)")
+            suffix = "\n(如需执行上述技能，请先调用 view_skill 工具查看详细指令)"
+            extra_parts.append("[可用技能列表]\n" + "\n".join(skill_lines) + suffix)
 
         messages.append({"role": "user", "content": user_text})
         return messages, "\n\n".join(extra_parts)
@@ -991,7 +992,10 @@ class LLMHandler:
         if not persona_text:
             # 向后兼容：直接配置的 system_prompt
             raw = ctx.config.get("system_prompt")
-            persona_text = raw if isinstance(raw, str) and raw.strip() else "你是 NekoBot，一个由 Neko 开发的智能机器人。"
+            persona_text = (
+                raw if isinstance(raw, str) and raw.strip()
+                else "你是 NekoBot，一个由 Neko 开发的智能机器人。"
+            )
 
         if extra_context:
             return f"{persona_text}\n\n{extra_context}"

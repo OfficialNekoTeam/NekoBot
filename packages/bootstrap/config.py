@@ -5,9 +5,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from ..providers.types import ValueMap
-from .defaults import DEFAULT_CONFIG, INITIAL_CONFIG_TEMPLATE
 from loguru import logger
+
+from ..providers.types import ValueMap
+from .crypto import decrypt_secrets, encrypt_secrets
+from .defaults import DEFAULT_CONFIG, INITIAL_CONFIG_TEMPLATE
 
 ScopedValueMap = dict[str, ValueMap]
 
@@ -26,8 +28,6 @@ class BootstrapConfig:
 
 DEFAULT_CONFIG_PATH = Path("data/config.json")
 
-
-from .crypto import decrypt_secrets, encrypt_secrets
 
 def load_app_config(path: str | Path | None = None) -> BootstrapConfig:
     config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
@@ -71,7 +71,6 @@ def check_config_integrity(current: dict[str, Any], reference: dict[str, Any]) -
 
 def save_app_config_raw(payload: dict[str, Any], path: Path) -> None:
     """直接保存原始字典到文件（包含加密逻辑）。"""
-    from .crypto import encrypt_secrets
     encrypted = encrypt_secrets(payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(encrypted, indent=4, ensure_ascii=False), encoding="utf-8")

@@ -3,11 +3,11 @@ from __future__ import annotations
 import importlib
 import os
 import pkgutil
-from quart import Quart, request, Response, Blueprint
+
+from quart import Blueprint, Quart, Response, request
 
 from ..app import NekoBotFramework
 from . import routes
-
 
 _DEFAULT_ORIGINS = frozenset({
     "http://localhost:6285",
@@ -100,6 +100,6 @@ def _discover_and_register_routes(app: Quart, routes_pkg: object) -> None:
                     url_prefix = getattr(attr, "url_prefix", None) or f"/api/{attr.name}"
                     app.register_blueprint(attr, url_prefix=url_prefix)
                     # logger.info(f"Registered blueprint: {attr.name} from {full_module_name}")
-        except Exception as e:
+        except Exception:
             # logger.error(f"Failed to load route module {full_module_name}: {e}")
             pass

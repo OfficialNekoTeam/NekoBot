@@ -434,11 +434,7 @@ async def test_quoted_text_injected_into_messages() -> None:
         )
 
     assert len(captured) == 1
-    # quoted_text is merged into system_prompt via extra_context, not a separate message
-    assert captured[0].system_prompt is not None
-    assert "original quoted content here" in captured[0].system_prompt, (
-        "quoted_text not found in system_prompt"
-    )
+    assert "original quoted content here" in (captured[0].system_prompt or "")
 
 
 # ===========================================================================
