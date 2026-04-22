@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from ..providers.types import ValueMap
 from .defaults import DEFAULT_CONFIG, INITIAL_CONFIG_TEMPLATE
