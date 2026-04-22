@@ -11,9 +11,13 @@ _DEFAULT_USERNAME = "nekobot"
 _DEFAULT_PASSWORD = "nekobot"
 _JWT_SECRET_FILE = Path("data/jwt_secret.key")
 
+# Module-level persistent connection and init flag
+_conn: aiosqlite.Connection | None = None
+_initialized: bool = False
+
 
 def load_jwt_secret() -> str:
-    """Load JWT secret from env var NEKOBOT_JWT_SECRET, persisted file, or generate one."""
+    """Load JWT secret from NEKOBOT_JWT_SECRET env var, persisted file, or generate one."""
     import os
 
     env_secret = os.environ.get("NEKOBOT_JWT_SECRET", "").strip()
@@ -27,43 +31,50 @@ def load_jwt_secret() -> str:
     return secret
 
 
-async def _open(db_path: Path = _DEFAULT_DB) -> aiosqlite.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = await aiosqlite.connect(db_path)
-    conn.row_factory = aiosqlite.Row
-    return conn
+async def _get_conn(db_path: Path = _DEFAULT_DB) -> aiosqlite.Connection:
+    global _conn
+    if _conn is None:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        _conn = await aiosqlite.connect(db_path)
+        _conn.row_factory = aiosqlite.Row
+    return _conn
 
 
 async def init_auth_db(db_path: Path = _DEFAULT_DB) -> None:
-    """Create users table and seed default admin if empty."""
-    async with await _open(db_path) as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                username     TEXT PRIMARY KEY,
-                password_hash BLOB NOT NULL,
-                created_at   TEXT DEFAULT (datetime('now'))
-            )
-            """
+    """Create users table and seed default admin. Idempotent — safe to call at startup once."""
+    global _initialized
+    if _initialized:
+        return
+    db = await _get_conn(db_path)
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            username      TEXT PRIMARY KEY,
+            password_hash BLOB NOT NULL,
+            created_at    TEXT DEFAULT (datetime('now'))
         )
-        cursor = await conn.execute(
-            "SELECT 1 FROM users WHERE username = ?", (_DEFAULT_USERNAME,)
+        """
+    )
+    cursor = await db.execute(
+        "SELECT 1 FROM users WHERE username = ?", (_DEFAULT_USERNAME,)
+    )
+    if await cursor.fetchone() is None:
+        hashed = bcrypt.hashpw(_DEFAULT_PASSWORD.encode(), bcrypt.gensalt())
+        await db.execute(
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            (_DEFAULT_USERNAME, hashed),
         )
-        if await cursor.fetchone() is None:
-            hashed = bcrypt.hashpw(_DEFAULT_PASSWORD.encode(), bcrypt.gensalt())
-            await conn.execute(
-                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                (_DEFAULT_USERNAME, hashed),
-            )
-        await conn.commit()
+    await db.commit()
+    _initialized = True
 
 
 async def verify_password(username: str, password: str, db_path: Path = _DEFAULT_DB) -> bool:
-    async with await _open(db_path) as conn:
-        cursor = await conn.execute(
-            "SELECT password_hash FROM users WHERE username = ?", (username,)
-        )
-        row = await cursor.fetchone()
+    await init_auth_db(db_path)
+    db = await _get_conn(db_path)
+    cursor = await db.execute(
+        "SELECT password_hash FROM users WHERE username = ?", (username,)
+    )
+    row = await cursor.fetchone()
     if row is None:
         return False
     stored: bytes = bytes(row["password_hash"])
@@ -73,10 +84,11 @@ async def verify_password(username: str, password: str, db_path: Path = _DEFAULT
 async def update_password(
     username: str, new_password: str, db_path: Path = _DEFAULT_DB
 ) -> None:
+    await init_auth_db(db_path)
     hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt())
-    async with await _open(db_path) as conn:
-        await conn.execute(
-            "UPDATE users SET password_hash = ? WHERE username = ?",
-            (hashed, username),
-        )
-        await conn.commit()
+    db = await _get_conn(db_path)
+    await db.execute(
+        "UPDATE users SET password_hash = ? WHERE username = ?",
+        (hashed, username),
+    )
+    await db.commit()

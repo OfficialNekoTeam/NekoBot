@@ -93,7 +93,9 @@ class AnthropicChatProvider(ChatProvider):
 
     @override
     async def teardown(self) -> None:
-        self._client = None
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def _build_messages(self, request: ProviderRequest) -> list[MessageParam]:
         messages: list[MessageParam] = []

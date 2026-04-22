@@ -9,11 +9,22 @@ from ..app import NekoBotFramework
 from . import routes
 
 
+_DEFAULT_ORIGINS = frozenset({
+    "http://localhost:6285",
+    "http://127.0.0.1:6285",
+})
+
+
 def _allowed_origins() -> frozenset[str]:
-    """Read comma-separated allowed origins from NEKOBOT_CORS_ORIGINS env var."""
+    """Read comma-separated allowed origins from NEKOBOT_CORS_ORIGINS env var.
+    Defaults to localhost:6285 when not set.
+    Set NEKOBOT_CORS_ORIGINS=* to disable CORS restrictions (development only).
+    """
     raw = os.environ.get("NEKOBOT_CORS_ORIGINS", "").strip()
     if not raw:
-        return frozenset()
+        return _DEFAULT_ORIGINS
+    if raw == "*":
+        return frozenset({"*"})
     return frozenset(o.strip() for o in raw.split(",") if o.strip())
 
 
@@ -24,26 +35,32 @@ def create_app(framework: NekoBotFramework) -> Quart:
     """创建并配置 Quart 实例，接入核心框架依赖。"""
     app = Quart(__name__)
 
+    def _cors_origin(origin: str) -> str | None:
+        if "*" in _CORS_ORIGINS:
+            return "*"
+        return origin if origin in _CORS_ORIGINS else None
+
     @app.after_request
     async def add_cors_headers(response: Response) -> Response:
-        if not _CORS_ORIGINS:
-            return response
         origin = request.headers.get("Origin", "")
-        if origin in _CORS_ORIGINS:
-            response.headers["Access-Control-Allow-Origin"] = origin
+        allowed = _cors_origin(origin)
+        if allowed:
+            response.headers["Access-Control-Allow-Origin"] = allowed
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE"
             response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-            response.headers["Vary"] = "Origin"
+            if allowed != "*":
+                response.headers["Vary"] = "Origin"
         return response
 
     @app.route("/", defaults={"path": ""}, methods=["OPTIONS"])
     @app.route("/<path:path>", methods=["OPTIONS"])
     async def cors_preflight(path: str) -> Response:
         origin = request.headers.get("Origin", "")
-        if origin not in _CORS_ORIGINS:
+        allowed = _cors_origin(origin)
+        if not allowed:
             return Response("", status=403)
         return Response("", status=204, headers={
-            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Origin": allowed,
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
             "Access-Control-Allow-Headers": "Content-Type, Authorization",
             "Vary": "Origin",

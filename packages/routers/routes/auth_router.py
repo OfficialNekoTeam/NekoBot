@@ -5,7 +5,7 @@ import datetime
 import jwt
 from quart import Blueprint, request
 
-from ..auth_store import init_auth_db, load_jwt_secret, update_password, verify_password
+from ..auth_store import load_jwt_secret, update_password, verify_password
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -39,7 +39,6 @@ async def login() -> dict[str, object]:
     if not username or not password:
         return {"success": False, "message": "Missing username or password."}, 400
 
-    await init_auth_db()
     if not await verify_password(username, password):
         return {"success": False, "message": "Invalid username or password."}, 401
 
@@ -84,7 +83,6 @@ async def change_password() -> dict[str, object]:
     if not old_password or not new_password:
         return {"success": False, "message": "Missing password fields."}, 400
 
-    await init_auth_db()
     if not await verify_password(username, old_password):
         return {"success": False, "message": "Current password is incorrect."}, 403
 
