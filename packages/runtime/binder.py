@@ -24,7 +24,6 @@ from ..decorators.core import (
     PLUGIN_SPEC_ATTR,
     PROVIDER_SPEC_ATTR,
 )
-from .dispatch_registry import CommandRegistry, EventHandlerRegistry
 from .registry import RuntimeRegistry
 
 
@@ -33,8 +32,6 @@ class FrameworkBinder:
         self.registry: RuntimeRegistry = registry
         # 延迟引入避免循环依赖，由 NekoBotFramework 在初始化后注入
         self._tool_registry: object | None = None
-        self._command_registry: CommandRegistry | None = None
-        self._event_handler_registry: EventHandlerRegistry | None = None
 
     def bind_plugin_class(self, plugin_class: type[object]) -> RegisteredPlugin:
         plugin_spec = cast(object, getattr(plugin_class, PLUGIN_SPEC_ATTR, None))
@@ -117,12 +114,6 @@ class FrameworkBinder:
             agent_tools=tuple(agent_tools),
         )
         self.registry.register_plugin(registered)
-
-        # 注册命令 / 事件到分发注册表
-        if self._command_registry is not None and registered.commands:
-            self._command_registry.register(plugin_spec.name, registered.commands)
-        if self._event_handler_registry is not None and registered.event_handlers:
-            self._event_handler_registry.register(plugin_spec.name, registered.event_handlers)
 
         # 注册 agent tools 到 ToolRegistry（如果已挂载）
         if self._tool_registry is not None:

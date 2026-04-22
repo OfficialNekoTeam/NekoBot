@@ -34,18 +34,31 @@ from .providers.types import (
     TTSRequest,
     ValueMap,
 )
-from .runtime import CommandRegistry, EventHandlerRegistry, FrameworkBinder, RuntimeRegistry
+from .runtime import (
+    CommandRegistry,
+    EventHandlerRegistry,
+    FrameworkBinder,
+    RuntimeRegistry,
+)
 from .runtime import context as runtime_context
 from .runtime.context import ExecutionContext, PluginContext
 from .schema import ObjectSchema, SchemaRegistry
 from .tools import ToolRegistry
+from .tools.mcp.manager import MCPManager
+from .skills.manager import SkillManager
+from .bootstrap.config import BootstrapConfig, save_app_config, load_app_config
 
 
 class NekoBotFramework:
     def __init__(self, conversation_store: ConversationStore | None = None) -> None:
         self.schema_registry: SchemaRegistry = SchemaRegistry()
+        # 命令 / 事件分发注册表（由 RuntimeRegistry 负责填充）
+        self.command_registry: CommandRegistry = CommandRegistry()
+        self.event_handler_registry: EventHandlerRegistry = EventHandlerRegistry()
         self.runtime_registry: RuntimeRegistry = RuntimeRegistry(
-            schema_registry=self.schema_registry
+            schema_registry=self.schema_registry,
+            command_registry=self.command_registry,
+            event_handler_registry=self.event_handler_registry,
         )
         self.binder: FrameworkBinder = FrameworkBinder(self.runtime_registry)
         self.conversation_resolver: ConversationResolver = ConversationResolver()
@@ -64,11 +77,53 @@ class NekoBotFramework:
         # Agent 工具注册表
         self.tool_registry: ToolRegistry = ToolRegistry()
         self.binder._tool_registry = self.tool_registry
-        # 命令 / 事件分发注册表
-        self.command_registry: CommandRegistry = CommandRegistry()
-        self.event_handler_registry: EventHandlerRegistry = EventHandlerRegistry()
-        self.binder._command_registry = self.command_registry
-        self.binder._event_handler_registry = self.event_handler_registry
+        # MCP 管理器
+        self.mcp_manager: MCPManager = MCPManager(self.tool_registry)
+        # Skill 管理器 (指令化扩展)
+        self.skill_manager: SkillManager = SkillManager(self)
+        self._register_builtin_tools()
+        self._config_observers: list[Callable[[BootstrapConfig], Awaitable[None]]] = []
+
+    def add_config_observer(self, observer: Callable[[BootstrapConfig], Awaitable[None]]) -> None:
+        self._config_observers.append(observer)
+
+    async def update_framework_config(self, new_config: BootstrapConfig) -> None:
+        """原子更新全局配置并触发观察者。"""
+        save_app_config(new_config)
+        for observer in self._config_observers:
+            await observer(new_config)
+
+    async def reload_mcp(self) -> None:
+        """重新从 mcp_server.json 加载 MCP 服务器。"""
+        # 这里直接调用 bootstrap 中的逻辑
+        from .bootstrap.runtime import _bootstrap_mcp
+        await self.mcp_manager.stop_all()
+        await _bootstrap_mcp(self)
+
+    def _register_builtin_tools(self) -> None:
+        """注册框架内建工具。"""
+        self.tool_registry.register_tool(
+            plugin_name="builtin",
+            tool_name="view_skill",
+            description="查看指定技能的详细指令和要求。在执行具体技能前必须先调用此工具了解详情。",
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "技能名称"
+                    }
+                },
+                "required": ["name"]
+            },
+            handler=self._view_skill_handler
+        )
+
+    async def _view_skill_handler(self, name: str) -> str:
+        skill = self.skill_manager.get_skill(name)
+        if not skill:
+            return f"错误：未找到名为 {name!r} 的技能。"
+        return skill.content or "该技能没有详细内容。"
 
     def register_schema(self, name: str, schema: ObjectSchema) -> None:
         self.runtime_registry.register_schema(name, schema)
@@ -136,7 +191,7 @@ class NekoBotFramework:
             plugin_bindings=plugin_bindings or {},
         )
 
-    def build_conversation_context(
+    async def build_conversation_context(
         self,
         execution: ExecutionContext,
         configuration: ConfigurationContext | None = None,
@@ -145,12 +200,12 @@ class NekoBotFramework:
             execution=execution,
             configuration=configuration,
         )
-        return self._hydrate_conversation_context(resolved)
+        return await self._hydrate_conversation_context(resolved)
 
-    def save_conversation_context(
+    async def save_conversation_context(
         self, conversation: ConversationContext
     ) -> ConversationContext:
-        return self.conversation_store.save(conversation)
+        return await self.conversation_store.save(conversation)
 
     async def review_input(
         self,
@@ -198,7 +253,7 @@ class NekoBotFramework:
             conversation=conversation,
         )
 
-    def build_provider_context(
+    async def build_provider_context(
         self,
         *,
         provider_name: str,
@@ -207,7 +262,7 @@ class NekoBotFramework:
         model: str | None = None,
         metadata: dict[str, object] | None = None,
     ) -> ProviderContext:
-        conversation = conversation or self.build_conversation_context(execution)
+        conversation = conversation or await self.build_conversation_context(execution)
         return ProviderContext(
             provider_name=provider_name,
             model=model,
@@ -230,16 +285,16 @@ class NekoBotFramework:
             metadata=metadata or execution.metadata.copy(),
         )
 
-    def _hydrate_conversation_context(
+    async def _hydrate_conversation_context(
         self, resolved: ConversationContext
     ) -> ConversationContext:
         stored: ConversationContext | None = None
         if resolved.conversation_key is not None:
-            stored = self.conversation_store.get_conversation(
+            stored = await self.conversation_store.get_conversation(
                 resolved.conversation_key.value
             )
         elif resolved.session_key is not None:
-            stored = self.conversation_store.get_session(resolved.session_key.value)
+            stored = await self.conversation_store.get_session(resolved.session_key.value)
 
         if stored is None:
             return resolved
@@ -272,7 +327,7 @@ class NekoBotFramework:
         conversation: ConversationContext | None = None,
     ) -> ModerationDecision:
         configuration = configuration or self.build_configuration_context()
-        conversation = conversation or self.build_conversation_context(
+        conversation = conversation or await self.build_conversation_context(
             execution=execution,
             configuration=configuration,
         )
@@ -294,7 +349,7 @@ class NekoBotFramework:
             preferred_backend=preferred_backend,
         )
 
-    def build_plugin_context(
+    async def build_plugin_context(
         self,
         *,
         plugin_name: str,
@@ -304,7 +359,7 @@ class NekoBotFramework:
         **kwargs: object,
     ) -> PluginContext:
         configuration = configuration or self.build_configuration_context()
-        conversation = conversation or self.build_conversation_context(
+        conversation = conversation or await self.build_conversation_context(
             execution=execution,
             configuration=configuration,
         )
@@ -475,7 +530,7 @@ class NekoBotFramework:
         **kwargs: object,
     ) -> object:
         configuration = configuration or self.build_configuration_context()
-        conversation = conversation or self.build_conversation_context(
+        conversation = conversation or await self.build_conversation_context(
             execution=execution,
             configuration=configuration,
         )
@@ -485,7 +540,7 @@ class NekoBotFramework:
             await self.provider_registry.configure(provider_name, provider_config)
 
         metadata_value = kwargs.pop("metadata", None)
-        provider_context = self.build_provider_context(
+        provider_context = await self.build_provider_context(
             provider_name=provider_name,
             execution=execution,
             conversation=conversation,

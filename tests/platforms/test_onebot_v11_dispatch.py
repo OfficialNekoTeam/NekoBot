@@ -11,14 +11,11 @@ from packages.contracts.specs import (
     RegisteredPlugin,
     RegisteredProvider,
 )
+from packages.llm.handler import LLMHandler
 from packages.platforms.onebot_v11.dispatch import OneBotV11Dispatcher
 from packages.platforms.onebot_v11.message_codec import OneBotV11MessageCodec
-from packages.platforms.onebot_v11.types import (
-    OneBotV11Event,
-    OneBotV11OutboundTarget,
-    OneBotV11Scene,
-)
-from packages.llm.handler import LLMHandler
+from packages.platforms.onebot_v11.types import OneBotV11OutboundTarget
+from packages.platforms.types import PlatformEvent, Scene
 from packages.providers.base import ChatProvider
 from packages.providers.types import ProviderRequest, ProviderResponse, ValueMap
 from packages.runtime.context import PluginContext
@@ -108,10 +105,11 @@ async def test_dispatch_builds_contexts_and_routes_reply() -> None:
         send_callable=send_callable,
         message_codec=OneBotV11MessageCodec(),
     )
-    event = OneBotV11Event(
+    event = PlatformEvent(
         event_type="message",
         event_name="message.group",
-        scene=OneBotV11Scene.GROUP,
+        scene=Scene.GROUP,
+        platform="onebot",
         platform_instance_uuid="instance-1",
         user_id="user-1",
         group_id="group-42",
@@ -162,10 +160,11 @@ async def test_dispatch_generic_group_handler_matches_concrete_group_event() -> 
         send_callable=send_callable,
         message_codec=OneBotV11MessageCodec(),
     )
-    event = OneBotV11Event(
+    event = PlatformEvent(
         event_type="message",
         event_name="message.group.normal",
-        scene=OneBotV11Scene.GROUP,
+        scene=Scene.GROUP,
+        platform="onebot",
         platform_instance_uuid="instance-1",
         user_id="user-1",
         group_id="group-42",
@@ -208,10 +207,11 @@ async def test_dispatch_generic_private_handler_matches_concrete_private_event()
         send_callable=send_callable,
         message_codec=OneBotV11MessageCodec(),
     )
-    event = OneBotV11Event(
+    event = PlatformEvent(
         event_type="message",
         event_name="message.private.friend",
-        scene=OneBotV11Scene.PRIVATE,
+        scene=Scene.PRIVATE,
+        platform="onebot",
         platform_instance_uuid="instance-1",
         user_id="user-1",
         chat_id="user-1",
@@ -251,10 +251,11 @@ async def test_dispatch_generic_notice_handler_matches_concrete_notice_event() -
         send_callable=send_callable,
         message_codec=OneBotV11MessageCodec(),
     )
-    event = OneBotV11Event(
+    event = PlatformEvent(
         event_type="notice",
         event_name="notice.notify.poke",
-        scene=OneBotV11Scene.PRIVATE,
+        scene=Scene.PRIVATE,
+        platform="onebot",
         platform_instance_uuid="instance-1",
         user_id="user-1",
         chat_id="user-1",
@@ -294,10 +295,11 @@ async def test_dispatch_llm_handler_replies_on_private_message() -> None:
         message_codec=OneBotV11MessageCodec(),
         llm_handler=llm_handler,
     )
-    event = OneBotV11Event(
+    event = PlatformEvent(
         event_type="message",
         event_name="message.private",
-        scene=OneBotV11Scene.PRIVATE,
+        scene=Scene.PRIVATE,
+        platform="onebot",
         platform_instance_uuid="instance-1",
         user_id="user-1",
         chat_id="user-1",

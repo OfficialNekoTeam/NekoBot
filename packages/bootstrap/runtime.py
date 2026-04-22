@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 
 from dataclasses import dataclass
 
@@ -11,6 +12,7 @@ from ..permissions.models import PermissionRule
 from ..platforms.bootstrap import PlatformBootstrap, RunningPlatformInstance
 from ..platforms.registry import PlatformRegistry
 from ..plugins.reloader import PluginReloader
+from ..tools.mcp.types import MCPServerConfig
 from ..providers.sources import (
     ANTHROPIC_PROVIDER_SCHEMA,
     EDGE_TTS_SCHEMA,
@@ -43,6 +45,7 @@ class BootstrappedRuntime:
             self.plugin_reloader.stop_watch()
         logger.info("Stopping {} platform instance(s)...", len(self.running_platforms))
         await self.platform_bootstrap.stop_platforms()
+        await self.framework.mcp_manager.stop_all()
         logger.info("Platform shutdown complete")
 
 
@@ -134,6 +137,52 @@ def _setup_permissions(
     )
 
 
+async def _bootstrap_mcp(framework: NekoBotFramework, data_dir: str = "data") -> None:
+    """Load and start MCP servers from mcp_server.json."""
+    from pathlib import Path
+    config_path = Path(data_dir) / "mcp_server.json"
+    if not config_path.exists():
+        logger.debug("MCP config not found at {}, skipping", config_path)
+        return
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # 兼容两种格式: {"mcpServers": {...}} 或直接是 {...}
+        servers_data = data.get("mcpServers", data) if isinstance(data, dict) else {}
+        
+        configs: list[MCPServerConfig] = []
+        for name, cfg in servers_data.items():
+            if not isinstance(cfg, dict):
+                continue
+            # 构建 MCPServerConfig
+            configs.append(MCPServerConfig(
+                name=name,
+                enabled=cfg.get("enabled", True),
+                transport=cfg.get("transport", "stdio"),
+                command=cfg.get("command"),
+                args=cfg.get("args"),
+                env=cfg.get("env"),
+                url=cfg.get("url")
+            ))
+        
+        if configs:
+            logger.info("Loading {} MCP server(s)...", len(configs))
+            await framework.mcp_manager.load(configs)
+            logger.info("MCP servers initialized: {}", ", ".join(framework.mcp_manager.connected_servers))
+    except Exception as exc:
+        logger.error("Failed to bootstrap MCP: {}", exc)
+
+
+async def _bootstrap_skills(framework: NekoBotFramework, data_dir: str = "data/skills") -> None:
+    """Recursively load skills from the skills directory."""
+    try:
+        await framework.skill_manager.load_all(data_dir)
+    except Exception as exc:
+        logger.error("Failed to bootstrap skills: {}", exc)
+
+
 async def bootstrap_runtime(
     app_config: BootstrapConfig | dict[object, object] | None = None,
     *,
@@ -152,6 +201,8 @@ async def bootstrap_runtime(
         normalized = normalize_app_config(app_config)
 
     _setup_permissions(framework, normalized.permission_config)
+    await _bootstrap_mcp(framework)
+    await _bootstrap_skills(framework)
     configuration = framework.build_configuration_context(
         framework_config=normalized.framework_config,
         plugin_configs=normalized.plugin_configs,

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import io
 import sys
-import tempfile
 import zipfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,7 +12,6 @@ import pytest
 from packages.app import NekoBotFramework
 from packages.plugins import PluginReloader
 from packages.plugins.manager import PluginManager
-
 
 # ---------------------------------------------------------------------------
 # Helpers

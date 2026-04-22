@@ -22,8 +22,8 @@ SendVoiceCallable = Callable[[bytes, str], Awaitable[str | None]]  # (audio_byte
 ProviderCallable = Callable[..., Awaitable[object]]
 TaskCallable = Callable[[str, ValueMap], Awaitable[object]]
 PermissionCallable = Callable[[tuple[str, ...], bool], PermissionDecision]
-SaveConversationCallable = Callable[[ConversationContext], ConversationContext]
-LoadConversationCallable = Callable[[str], ConversationContext | None]
+SaveConversationCallable = Callable[[ConversationContext], Awaitable[ConversationContext]]
+LoadConversationCallable = Callable[[str], Awaitable[ConversationContext | None]]
 
 
 async def _noop_reply(message: str) -> str | None:
@@ -58,11 +58,11 @@ def _allow_all_permissions(
     return PermissionDecision(allowed=True, reason="default allow")
 
 
-def _noop_save_conversation(context: ConversationContext) -> ConversationContext:
+async def _noop_save_conversation(context: ConversationContext) -> ConversationContext:
     return context
 
 
-def _noop_load_conversation(key: str) -> ConversationContext | None:
+async def _noop_load_conversation(key: str) -> ConversationContext | None:
     _ = key
     return None
 
@@ -153,7 +153,9 @@ class PluginContext:
         """发送语音消息，audio_bytes 为音频二进制，返回 message_id 或 None。"""
         return await self.send_voice_callable(audio_bytes, mime_type)
 
-    async def tts(self, text: str, *, provider_name: str, voice: str | None = None, model: str | None = None) -> bytes | None:
+    async def tts(
+        self, text: str, *, provider_name: str, voice: str | None = None, model: str | None = None
+    ) -> bytes | None:
         """调用 TTS provider 合成语音，返回音频二进制（mp3）。失败返回 None。"""
         from ..providers.types import TTSRequest, TTSResponse
         try:
@@ -169,7 +171,9 @@ class PluginContext:
             return None
         return None
 
-    async def stt(self, audio_bytes: bytes, mime_type: str = "audio/mpeg", *, provider_name: str, model: str | None = None) -> str | None:
+    async def stt(
+        self, audio_bytes: bytes, mime_type: str = "audio/mpeg", *, provider_name: str, model: str | None = None
+    ) -> str | None:
         """调用 STT provider 转写语音，返回文字。失败返回 None。"""
         from ..providers.types import STTRequest, STTResponse
         try:
@@ -185,11 +189,11 @@ class PluginContext:
             return None
         return None
 
-    def save_conversation(self, context: ConversationContext) -> ConversationContext:
-        return self.save_conversation_callable(context)
+    async def save_conversation(self, context: ConversationContext) -> ConversationContext:
+        return await self.save_conversation_callable(context)
 
-    def load_conversation(self, key: str) -> ConversationContext | None:
-        return self.load_conversation_callable(key)
+    async def load_conversation(self, key: str) -> ConversationContext | None:
+        return await self.load_conversation_callable(key)
 
     async def request_provider(self, provider_name: str, **kwargs: object) -> object:
         return await self.provider_callable(provider_name=provider_name, **kwargs)

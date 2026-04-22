@@ -4,7 +4,6 @@ import json
 from typing import Any
 
 import mcp.types
-from loguru import logger
 
 from ..registry import ToolEntry
 

@@ -1,150 +1,227 @@
 from __future__ import annotations
 
+import collections
 import json
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from typing import Protocol, cast
 
+import aiosqlite
+
 from .context import ConversationContext
 from .models import ConversationKey, SessionKey, ValueMap
 
 
 class ConversationStore(Protocol):
-    def get_conversation(self, conversation_key: str) -> ConversationContext | None: ...
+    async def get_conversation(self, conversation_key: str) -> ConversationContext | None: ...
 
-    def get_session(self, session_key: str) -> ConversationContext | None: ...
+    async def get_session(self, session_key: str) -> ConversationContext | None: ...
 
-    def save(self, context: ConversationContext) -> ConversationContext: ...
+    async def save(self, context: ConversationContext) -> ConversationContext: ...
 
-    def upsert(self, context: ConversationContext) -> ConversationContext: ...
+    async def upsert(self, context: ConversationContext) -> ConversationContext: ...
 
-    def delete(self, conversation_key: str) -> None: ...
+    async def delete(self, conversation_key: str) -> None: ...
 
-    def list_conversation_keys(self) -> tuple[str, ...]: ...
+    async def list_conversation_keys(self) -> tuple[str, ...]: ...
+
+    # Persona 管理
+    async def get_persona(self, name: str) -> str | None: ...
+    async def save_persona(self, name: str, prompt: str) -> None: ...
+    async def list_personas(self) -> dict[str, str]: ...
+    async def delete_persona(self, name: str) -> None: ...
 
 
 class InMemoryConversationStore:
-    def __init__(self) -> None:
-        self._conversations: dict[str, ConversationContext] = {}
-        self._sessions: dict[str, ConversationContext] = {}
+    def __init__(self, max_size: int = 1000) -> None:
+        self.max_size = max_size
+        self._conversations: collections.OrderedDict[str, ConversationContext] = collections.OrderedDict()
+        self._sessions: collections.OrderedDict[str, ConversationContext] = collections.OrderedDict()
 
-    def get_conversation(self, conversation_key: str) -> ConversationContext | None:
+    async def get_conversation(self, conversation_key: str) -> ConversationContext | None:
         context = self._conversations.get(conversation_key)
         if context is None:
             return None
         return _clone_context(context)
 
-    def get_session(self, session_key: str) -> ConversationContext | None:
+    async def get_session(self, session_key: str) -> ConversationContext | None:
         context = self._sessions.get(session_key)
         if context is None:
             return None
         return _clone_context(context)
 
-    def save(self, context: ConversationContext) -> ConversationContext:
+    async def save(self, context: ConversationContext) -> ConversationContext:
         stored = _clone_context(context)
         if stored.conversation_key is not None:
             self._conversations[stored.conversation_key.value] = stored
+            self._conversations.move_to_end(stored.conversation_key.value)
+            if len(self._conversations) > self.max_size:
+                self._conversations.popitem(last=False)
         if stored.session_key is not None:
             self._sessions[stored.session_key.value] = stored
+            self._sessions.move_to_end(stored.session_key.value)
+            if len(self._sessions) > self.max_size:
+                self._sessions.popitem(last=False)
         return _clone_context(stored)
 
-    def upsert(self, context: ConversationContext) -> ConversationContext:
-        return self.save(context)
+    async def upsert(self, context: ConversationContext) -> ConversationContext:
+        return await self.save(context)
 
-    def delete(self, conversation_key: str) -> None:
+    async def delete(self, conversation_key: str) -> None:
         context = self._conversations.pop(conversation_key, None)
         if context is None or context.session_key is None:
             return
         _ = self._sessions.pop(context.session_key.value, None)
 
-    def list_conversation_keys(self) -> tuple[str, ...]:
+    async def list_conversation_keys(self) -> tuple[str, ...]:
         return tuple(sorted(self._conversations.keys()))
+
+    async def get_persona(self, name: str) -> str | None:
+        return None  # TODO: 实现内存在线管理？（可选）
+
+    async def save_persona(self, name: str, prompt: str) -> None:
+        pass
+
+    async def list_personas(self) -> dict[str, str]:
+        return {}
+
+    async def delete_persona(self, name: str) -> None:
+        pass
 
 
 class SQLiteConversationStore:
+    """Async SQLite conversation store backed by aiosqlite.
+
+    Schema initialisation is done synchronously in __init__ (one-time,
+    negligible cost) so callers don't need an extra async setup step.
+    All data-access methods are fully async and do not block the event loop.
+    """
+
+    _INSERT_SQL = (
+        "INSERT INTO conversations ("
+        "conversation_key, session_key, isolation_mode, conversation_id, scope, "
+        "platform_type, platform_instance_uuid, chat_id, actor_id, thread_id, "
+        "history_json, summary, memory_refs_json, provider_preferences_json, "
+        "metadata_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(conversation_key) DO UPDATE SET "
+        "session_key=excluded.session_key, isolation_mode=excluded.isolation_mode, "
+        "conversation_id=excluded.conversation_id, scope=excluded.scope, "
+        "platform_type=excluded.platform_type, "
+        "platform_instance_uuid=excluded.platform_instance_uuid, "
+        "chat_id=excluded.chat_id, actor_id=excluded.actor_id, "
+        "thread_id=excluded.thread_id, "
+        "history_json=excluded.history_json, summary=excluded.summary, "
+        "memory_refs_json=excluded.memory_refs_json, "
+        "provider_preferences_json=excluded.provider_preferences_json, "
+        "metadata_json=excluded.metadata_json"
+    )
+
     def __init__(self, database_path: str | Path) -> None:
         self.database_path: Path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        self._initialize_sync()
+        self._conn: aiosqlite.Connection | None = None
 
-    def get_conversation(self, conversation_key: str) -> ConversationContext | None:
-        query = "SELECT * FROM conversations WHERE conversation_key = ?"
-        with self._connect() as connection:
-            row = cast(
-                sqlite3.Row | None,
-                connection.execute(query, (conversation_key,)).fetchone(),
-            )
+    async def _get_conn(self) -> aiosqlite.Connection:
+        if self._conn is None:
+            self._conn = await aiosqlite.connect(self.database_path)
+            self._conn.row_factory = aiosqlite.Row
+        return self._conn
+
+    # ------------------------------------------------------------------
+    # Public async interface
+    # ------------------------------------------------------------------
+
+    async def get_conversation(self, conversation_key: str) -> ConversationContext | None:
+        db = await self._get_conn()
+        async with db.execute(
+            "SELECT * FROM conversations WHERE conversation_key = ?",
+            (conversation_key,),
+        ) as cursor:
+            row = await cursor.fetchone()
         if row is None:
             return None
         return _clone_context(self._row_to_context(row))
 
-    def get_session(self, session_key: str) -> ConversationContext | None:
-        query = "SELECT * FROM conversations WHERE session_key = ?"
-        with self._connect() as connection:
-            row = cast(
-                sqlite3.Row | None,
-                connection.execute(query, (session_key,)).fetchone(),
-            )
+    async def get_session(self, session_key: str) -> ConversationContext | None:
+        db = await self._get_conn()
+        async with db.execute(
+            "SELECT * FROM conversations WHERE session_key = ?",
+            (session_key,),
+        ) as cursor:
+            row = await cursor.fetchone()
         if row is None:
             return None
         return _clone_context(self._row_to_context(row))
 
-    def save(self, context: ConversationContext) -> ConversationContext:
+    async def save(self, context: ConversationContext) -> ConversationContext:
         stored = _clone_context(context)
         payload = self._context_to_row(stored)
-        query = (
-            "INSERT INTO conversations ("
-            "conversation_key, session_key, isolation_mode, conversation_id, scope, "
-            "platform_type, platform_instance_uuid, chat_id, actor_id, thread_id, "
-            "history_json, summary, memory_refs_json, provider_preferences_json, "
-            "metadata_json"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(conversation_key) DO UPDATE SET "
-            "session_key=excluded.session_key, isolation_mode=excluded.isolation_mode, "
-            "conversation_id=excluded.conversation_id, scope=excluded.scope, "
-            "platform_type=excluded.platform_type, "
-            "platform_instance_uuid=excluded.platform_instance_uuid, "
-            "chat_id=excluded.chat_id, actor_id=excluded.actor_id, "
-            "thread_id=excluded.thread_id, "
-            "history_json=excluded.history_json, summary=excluded.summary, "
-            "memory_refs_json=excluded.memory_refs_json, "
-            "provider_preferences_json=excluded.provider_preferences_json, "
-            "metadata_json=excluded.metadata_json"
-        )
-        with self._connect() as connection:
-            _ = connection.execute(query, payload)
-            connection.commit()
+        db = await self._get_conn()
+        await db.execute(self._INSERT_SQL, payload)
+        await db.commit()
         return _clone_context(stored)
 
-    def upsert(self, context: ConversationContext) -> ConversationContext:
-        return self.save(context)
+    async def upsert(self, context: ConversationContext) -> ConversationContext:
+        return await self.save(context)
 
-    def delete(self, conversation_key: str) -> None:
-        with self._connect() as connection:
-            _ = connection.execute(
-                "DELETE FROM conversations WHERE conversation_key = ?",
-                (conversation_key,),
-            )
-            connection.commit()
+    async def delete(self, conversation_key: str) -> None:
+        db = await self._get_conn()
+        await db.execute(
+            "DELETE FROM conversations WHERE conversation_key = ?",
+            (conversation_key,),
+        )
+        await db.commit()
 
-    def list_conversation_keys(self) -> tuple[str, ...]:
-        with self._connect() as connection:
-            rows = cast(
-                list[sqlite3.Row],
-                connection.execute(
-                    "SELECT conversation_key FROM conversations "
-                    + "ORDER BY conversation_key"
-                ).fetchall(),
-            )
+    async def list_conversation_keys(self) -> tuple[str, ...]:
+        db = await self._get_conn()
+        async with db.execute(
+            "SELECT conversation_key FROM conversations ORDER BY conversation_key"
+        ) as cursor:
+            rows = await cursor.fetchall()
         return tuple(row[0] for row in rows)
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    # ------------------------------------------------------------------
+    # Persona CRUD
+    # ------------------------------------------------------------------
 
-    def _initialize(self) -> None:
+    async def get_persona(self, name: str) -> str | None:
+        db = await self._get_conn()
+        async with db.execute(
+            "SELECT prompt FROM personas WHERE name = ?",
+            (name,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def save_persona(self, name: str, prompt: str) -> None:
+        db = await self._get_conn()
+        await db.execute(
+            "INSERT INTO personas (name, prompt) VALUES (?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET prompt=excluded.prompt",
+            (name, prompt),
+        )
+        await db.commit()
+
+    async def list_personas(self) -> dict[str, str]:
+        db = await self._get_conn()
+        async with db.execute("SELECT name, prompt FROM personas") as cursor:
+            rows = await cursor.fetchall()
+        return {row[0]: row[1] for row in rows}
+
+    async def delete_persona(self, name: str) -> None:
+        db = await self._get_conn()
+        await db.execute("DELETE FROM personas WHERE name = ?", (name,))
+        await db.commit()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _initialize_sync(self) -> None:
+        """Create the schema using plain sqlite3 (one-time, startup only)."""
         schema = (
             "CREATE TABLE IF NOT EXISTS conversations ("
             "conversation_key TEXT PRIMARY KEY, "
@@ -164,9 +241,17 @@ class SQLiteConversationStore:
             "metadata_json TEXT NOT NULL"
             ")"
         )
-        with self._connect() as connection:
-            _ = connection.execute(schema)
-            connection.commit()
+        with sqlite3.connect(self.database_path) as conn:
+            conn.execute(schema)
+            # 新增 personas 表
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS personas ("
+                "name TEXT PRIMARY KEY, "
+                "prompt TEXT NOT NULL, "
+                "metadata_json TEXT"
+                ")"
+            )
+            conn.commit()
 
     def _context_to_row(self, context: ConversationContext) -> tuple[str | None, ...]:
         conversation_key = (
@@ -191,14 +276,12 @@ class SQLiteConversationStore:
             json.dumps(context.metadata, ensure_ascii=True),
         )
 
-    def _row_to_context(self, row: sqlite3.Row) -> ConversationContext:
+    def _row_to_context(self, row: aiosqlite.Row) -> ConversationContext:
         conversation_key = self._row_str(row, "conversation_key")
         session_key = self._row_str(row, "session_key")
         return ConversationContext(
             isolation_mode=self._row_str(row, "isolation_mode") or "",
-            conversation_key=ConversationKey(conversation_key)
-            if conversation_key
-            else None,
+            conversation_key=ConversationKey(conversation_key) if conversation_key else None,
             session_key=SessionKey(session_key) if session_key else None,
             conversation_id=self._row_str(row, "conversation_id"),
             scope=self._row_str(row, "scope"),
@@ -214,11 +297,11 @@ class SQLiteConversationStore:
             metadata=self._row_value_map(row, "metadata_json"),
         )
 
-    def _row_str(self, row: sqlite3.Row, key: str) -> str | None:
+    def _row_str(self, row: aiosqlite.Row, key: str) -> str | None:
         value = cast(object, row[key])
         return value if isinstance(value, str) else None
 
-    def _row_list_of_maps(self, row: sqlite3.Row, key: str) -> list[ValueMap]:
+    def _row_list_of_maps(self, row: aiosqlite.Row, key: str) -> list[ValueMap]:
         value = cast(object, row[key])
         if not isinstance(value, str):
             return []
@@ -232,7 +315,7 @@ class SQLiteConversationStore:
             if isinstance(item, dict)
         ]
 
-    def _row_list_of_strings(self, row: sqlite3.Row, key: str) -> list[str]:
+    def _row_list_of_strings(self, row: aiosqlite.Row, key: str) -> list[str]:
         value = cast(object, row[key])
         if not isinstance(value, str):
             return []
@@ -242,7 +325,7 @@ class SQLiteConversationStore:
         items = cast(list[object], decoded)
         return [item for item in items if isinstance(item, str)]
 
-    def _row_value_map(self, row: sqlite3.Row, key: str) -> ValueMap:
+    def _row_value_map(self, row: aiosqlite.Row, key: str) -> ValueMap:
         value = cast(object, row[key])
         if not isinstance(value, str):
             return {}
@@ -260,11 +343,19 @@ class SQLiteConversationStore:
         }
 
 
-def _clone_context(context: ConversationContext) -> ConversationContext:
+def _clone_context(context: ConversationContext, max_history_size: int = 150) -> ConversationContext:
+    history = list(context.history)
+    if len(history) > max_history_size:
+        # Keep the latest messages + system messages (optional, usually system is fixed logic).
+        # We simply truncate to avoid OOM. Wait, if there are important system prompts at index 0,
+        # usually they are passed dynamically via ProviderRequest, not stored in history forever.
+        # But just in case, we keep the last MAX events.
+        history = history[-max_history_size:]
+
     return replace(
         context,
-        history=list(context.history),
-        memory_refs=list(context.memory_refs),
+        history=history,
+        memory_refs=list(context.memory_refs)[:max_history_size],  # Same bounds for safety
         provider_preferences=dict(context.provider_preferences),
         metadata=dict(context.metadata),
     )

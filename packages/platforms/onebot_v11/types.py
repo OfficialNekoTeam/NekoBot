@@ -6,6 +6,11 @@ from typing import TypeAlias
 ValueMap: TypeAlias = dict[str, object]
 
 
+# ---------------------------------------------------------------------------
+# OneBot V11 protocol constants
+# ---------------------------------------------------------------------------
+
+
 class OneBotV11EventType:
     MESSAGE: str = "message"
     NOTICE: str = "notice"
@@ -21,26 +26,38 @@ class OneBotV11Scene:
 
 
 class OneBotV11SegmentType:
+    """Wire-format segment type names used by the OneBot V11 protocol.
+
+    These reflect the raw JSON segment types sent over the wire.  Inbound
+    events are normalised to platform-agnostic SegmentType values
+    (packages.platforms.types.SegmentType) by the event parser.
+    """
+
     TEXT: str = "text"
     AT: str = "at"
     REPLY: str = "reply"
     IMAGE: str = "image"
+    RECORD: str = "record"
+    VIDEO: str = "video"
+    FACE: str = "face"
+    FORWARD: str = "forward"
+    JSON: str = "json"
+    XML: str = "xml"
     UNKNOWN: str = "unknown"
 
 
-@dataclass(frozen=True)
-class OneBotV11Sender:
-    user_id: str | None = None
-    nickname: str | None = None
-    card: str | None = None
-    role: str | None = None
-    sex: str | None = None
-    age: int | None = None
-    metadata: ValueMap = field(default_factory=dict)
+# ---------------------------------------------------------------------------
+# Outbound (codec / sending) types — OneBot V11 specific
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class OneBotV11MessageSegment:
+    """Raw OneBot V11 message segment used by the message codec for encoding
+    outbound messages.  Inbound events use the platform-agnostic
+    MessageSegment from packages.platforms.types instead.
+    """
+
     type: str
     data: ValueMap = field(default_factory=dict)
 
@@ -53,27 +70,4 @@ class OneBotV11OutboundTarget:
     group_id: str | None = None
     message_id: str | None = None
     reply_to_message_id: str | None = None
-    metadata: ValueMap = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class OneBotV11Event:
-    event_type: str
-    event_name: str
-    scene: str
-    platform: str = "onebot"
-    platform_instance_uuid: str | None = None
-    self_id: str | None = None
-    message_id: str | None = None
-    user_id: str | None = None
-    group_id: str | None = None
-    chat_id: str | None = None
-    sub_type: str | None = None
-    post_type: str | None = None
-    detail_type: str | None = None
-    time: int | None = None
-    plain_text: str | None = None
-    sender: OneBotV11Sender | None = None
-    segments: list[OneBotV11MessageSegment] = field(default_factory=list)
-    raw_event: ValueMap = field(default_factory=dict)
     metadata: ValueMap = field(default_factory=dict)

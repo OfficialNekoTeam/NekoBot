@@ -4,13 +4,11 @@ from .dispatch import OneBotV11Dispatcher
 from .event_parser import OneBotV11EventParser
 from .message_codec import OneBotV11MessageCodec
 from .types import (
-    OneBotV11Event,
     OneBotV11EventType,
     OneBotV11MessageSegment,
     OneBotV11OutboundTarget,
     OneBotV11Scene,
     OneBotV11SegmentType,
-    OneBotV11Sender,
 )
 
 __all__ = [
@@ -18,7 +16,6 @@ __all__ = [
     "OneBotV11AdapterConfig",
     "build_onebot_v11_config",
     "create_onebot_v11_adapter",
-    "OneBotV11Event",
     "OneBotV11EventParser",
     "OneBotV11EventType",
     "OneBotV11Dispatcher",
@@ -27,5 +24,4 @@ __all__ = [
     "OneBotV11OutboundTarget",
     "OneBotV11Scene",
     "OneBotV11SegmentType",
-    "OneBotV11Sender",
 ]

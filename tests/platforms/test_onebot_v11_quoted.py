@@ -6,12 +6,7 @@ from __future__ import annotations
 from packages.app import NekoBotFramework
 from packages.platforms.onebot_v11.dispatch import OneBotV11Dispatcher
 from packages.platforms.onebot_v11.message_codec import OneBotV11MessageCodec
-from packages.platforms.onebot_v11.types import (
-    OneBotV11Event,
-    OneBotV11MessageSegment,
-    OneBotV11Scene,
-)
-
+from packages.platforms.types import MessageSegment, PlatformEvent, Scene, SegmentType
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -48,21 +43,21 @@ def _make_dispatcher(
     )
 
 
-def _seg(type_: str, **data: object) -> OneBotV11MessageSegment:
-    from packages.platforms.onebot_v11.types import ValueMap
-    return OneBotV11MessageSegment(type=type_, data=dict(data))  # type: ignore[arg-type]
+def _seg(type_: str, **data: object) -> MessageSegment:
+    return MessageSegment(type=type_, data=dict(data))  # type: ignore[arg-type]
 
 
 def _event(
-    segments: list[OneBotV11MessageSegment] | None = None,
+    segments: list[MessageSegment] | None = None,
     *,
     self_id: str = "bot-99",
     plain_text: str = "",
-) -> OneBotV11Event:
-    return OneBotV11Event(
+) -> PlatformEvent:
+    return PlatformEvent(
         event_type="message",
         event_name="message.group",
-        scene=OneBotV11Scene.GROUP,
+        scene=Scene.GROUP,
+        platform="onebot",
         platform_instance_uuid="inst-1",
         self_id=self_id,
         user_id="user-1",
@@ -82,7 +77,7 @@ def _event(
 async def test_image_url_from_direct_segment() -> None:
     dispatcher = _make_dispatcher()
     event = _event(segments=[
-        _seg("image", url="https://cdn.example.com/img.jpg", file="img.jpg"),
+        _seg(SegmentType.IMAGE, url="https://cdn.example.com/img.jpg", file="img.jpg"),
     ])
     result = await dispatcher._analyze_quoted_message(event)
     assert "https://cdn.example.com/img.jpg" in result["image_urls"]
@@ -92,7 +87,7 @@ async def test_image_with_no_http_url_ignored() -> None:
     """file:// or local paths should not be added."""
     dispatcher = _make_dispatcher()
     event = _event(segments=[
-        _seg("image", file="somefile.image", url=""),
+        _seg(SegmentType.IMAGE, file="somefile.image", url=""),
     ])
     result = await dispatcher._analyze_quoted_message(event)
     assert result["image_urls"] == []
@@ -125,7 +120,7 @@ async def test_reply_to_self_detected_via_user_id() -> None:
         }
     )
     event = _event(
-        segments=[_seg("reply", id="msg-42")],
+        segments=[_seg(SegmentType.REPLY, message_id="msg-42")],
         self_id="bot-99",
     )
     result = await dispatcher._analyze_quoted_message(event)
@@ -145,7 +140,7 @@ async def test_reply_to_self_detected_via_sender_user_id() -> None:
             }
         }
     )
-    event = _event(segments=[_seg("reply", id="msg-10")], self_id="bot-99")
+    event = _event(segments=[_seg(SegmentType.REPLY, message_id="msg-10")], self_id="bot-99")
     result = await dispatcher._analyze_quoted_message(event)
     assert result["is_reply_to_self"] is True
 
@@ -162,7 +157,7 @@ async def test_reply_to_other_user_not_self() -> None:
             }
         }
     )
-    event = _event(segments=[_seg("reply", id="msg-5")], self_id="bot-99")
+    event = _event(segments=[_seg(SegmentType.REPLY, message_id="msg-5")], self_id="bot-99")
     result = await dispatcher._analyze_quoted_message(event)
     assert result["is_reply_to_self"] is False
 
@@ -179,7 +174,7 @@ async def test_reply_extracts_text_from_original_message() -> None:
             }
         }
     )
-    event = _event(segments=[_seg("reply", id="msg-7")])
+    event = _event(segments=[_seg(SegmentType.REPLY, message_id="msg-7")])
     result = await dispatcher._analyze_quoted_message(event)
     assert result["quoted_text"] == "original text"
 
@@ -198,7 +193,7 @@ async def test_reply_extracts_image_from_original_message() -> None:
             }
         }
     )
-    event = _event(segments=[_seg("reply", id="msg-8")])
+    event = _event(segments=[_seg(SegmentType.REPLY, message_id="msg-8")])
     result = await dispatcher._analyze_quoted_message(event)
     assert "https://cdn.example.com/x.jpg" in result["image_urls"]
 
@@ -247,7 +242,7 @@ async def test_forward_segment_triggers_get_forward_msg() -> None:
         fetch_message_callable=fetch_message_callable,
         fetch_forward_callable=fetch_forward_callable,
     )
-    event = _event(segments=[_seg("reply", id="msg-fwd")])
+    event = _event(segments=[_seg(SegmentType.REPLY, message_id="msg-fwd")])
     result = await dispatcher._analyze_quoted_message(event)
 
     assert "fwd-001" in fetched_forward_ids
@@ -459,9 +454,8 @@ async def test_extract_forward_text_cycle_prevention() -> None:
         }
     )
     # Must not raise / hang
-    text = await dispatcher._extract_forward_text("fwd-a")
+    await dispatcher._extract_forward_text("fwd-a")
     # Result may be None or truncated — just must complete
-    assert True
 
 
 async def test_extract_forward_text_empty_data_returns_none() -> None:

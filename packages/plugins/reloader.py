@@ -58,7 +58,9 @@ def load_plugin_metadata(plugin_dir: Path) -> PluginMetadata | None:
             display_name=str(data["display_name"]) if data.get("display_name") else None,
             tags=list(data["tags"]) if isinstance(data.get("tags"), list) else None,
             nekobot_version=str(data["nekobot_version"]) if data.get("nekobot_version") else None,
-            support_platforms=list(data["support_platforms"]) if isinstance(data.get("support_platforms"), list) else None,
+            support_platforms=list(data["support_platforms"])
+            if isinstance(data.get("support_platforms"), list)
+            else None,
             root_dir=plugin_dir.name,
         )
     except Exception as exc:
@@ -252,6 +254,9 @@ class PluginReloader:
     def get_metadata(self, dir_name: str) -> PluginMetadata | None:
         return self._metadata.get(dir_name)
 
+    def register_metadata(self, dir_name: str, meta: PluginMetadata) -> None:
+        self._metadata[dir_name] = meta
+
     @property
     def loaded_plugins(self) -> dict[str, str]:
         """返回 {plugin_name: module_path} 映射（快照）。"""
@@ -285,10 +290,8 @@ class PluginReloader:
     def _unregister_from_module(self, module_path: str) -> list[str]:
         names = [n for n, mp in self._source.items() if mp == module_path]
         for name in names:
-            self.framework.runtime_registry.unregister_plugin(name)
+            self.framework.runtime_registry.unregister_plugin(name)  # 级联更新 command/event 注册表
             self.framework.tool_registry.unregister_plugin(name)
-            self.framework.command_registry.unregister_plugin(name)
-            self.framework.event_handler_registry.unregister_plugin(name)
             del self._source[name]
             logger.info("PluginReloader: unloaded {!r}", name)
         return names

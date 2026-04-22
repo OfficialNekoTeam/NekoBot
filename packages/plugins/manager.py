@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import shutil
 import sys
 import tempfile
@@ -115,7 +114,7 @@ class PluginManager:
 
         meta = load_plugin_metadata(plugin_dir)
         if meta:
-            self.reloader._metadata[plugin_dir.name] = meta
+            self.reloader.register_metadata(plugin_dir.name, meta)
 
         logger.info("PluginManager: installed {} (plugins: {})", plugin_dir.name, names)
         return True
@@ -148,7 +147,7 @@ class PluginManager:
 
         dir_name = module_path.split(".")[-1]
         target = self.plugin_dir / dir_name
-        meta = self.reloader._metadata.get(dir_name) or load_plugin_metadata(target)
+        meta = self.reloader.get_metadata(dir_name) or load_plugin_metadata(target)
 
         if meta is None or meta.repository is None:
             logger.warning("PluginManager: no repository URL found for {!r}, cannot update", plugin_name)
@@ -166,7 +165,7 @@ class PluginManager:
         result = []
         for entry in sorted(self.plugin_dir.iterdir()):
             if entry.is_dir() and (entry / "__init__.py").exists():
-                meta = self.reloader._metadata.get(entry.name) or load_plugin_metadata(entry)
+                meta = self.reloader.get_metadata(entry.name) or load_plugin_metadata(entry)
                 if meta:
                     result.append(meta)
         return result
@@ -274,7 +273,13 @@ class PluginManager:
 
     async def _extract(self, zip_path: Path, *, dir_name: str) -> Path | None:
         """解压 ZIP 到插件目录，处理 GitHub archive 的顶层嵌套目录。"""
-        target = self.plugin_dir / dir_name
+        # 防止 Path Traversal 地址遍历漏洞
+        safe_dir_name = Path(dir_name).name
+        if not safe_dir_name or safe_dir_name in (".", ".."):
+            logger.error("PluginManager: Invalid directory name {!r}", dir_name)
+            return None
+            
+        target = self.plugin_dir / safe_dir_name
 
         if target.exists():
             logger.warning("PluginManager: {} already exists, overwriting", dir_name)

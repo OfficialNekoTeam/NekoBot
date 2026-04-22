@@ -43,6 +43,10 @@ OPENAI_PROVIDER_SCHEMA = ObjectSchema(
         "default_model": StringField(required=False),
         "organization": StringField(required=False),
         "project": StringField(required=False),
+        "base_url": StringField(required=False),
+        "api_flavor": StringField(required=False),
+        "store": BooleanField(required=False),
+        "reasoning_effort": StringField(required=False),
         "timeout_seconds": IntegerField(required=False, minimum=1),
         "enable_streaming": BooleanField(required=False),
     }
@@ -87,6 +91,7 @@ class OpenAIChatProvider(ChatProvider):
             api_key=cast(str, self.config.get("api_key")),
             organization=cast(str | None, self.config.get("organization")),
             project=cast(str | None, self.config.get("project")),
+            base_url=cast(str | None, self.config.get("base_url")),
             timeout=cast(int | None, self.config.get("timeout_seconds")),
         )
 
@@ -99,6 +104,12 @@ class OpenAIChatProvider(ChatProvider):
 
     @override
     async def generate(self, request: ProviderRequest) -> ProviderResponse:
+        api_flavor = self.config.get("api_flavor", "chat_completions")
+        if api_flavor == "responses":
+            return await self._generate_via_responses(request)
+        return await self._generate_via_chat(request)
+
+    async def _generate_via_chat(self, request: ProviderRequest) -> ProviderResponse:
         client = self._require_client()
         model = self._resolve_model(request)
         if not model:
@@ -106,26 +117,25 @@ class OpenAIChatProvider(ChatProvider):
 
         messages = self._build_messages(request)
         tools = self._build_tools(request.tools)
+        
+        # Reasoning effort for o1/o3
+        reasoning_effort = self.config.get("reasoning_effort") or request.options.get("reasoning_effort")
+        
+        create_kwargs: dict[str, object] = {
+            "model": model,
+            "messages": messages,
+            "stream": request.stream,
+        }
+        if tools:
+            create_kwargs["tools"] = tools
+        if reasoning_effort:
+            create_kwargs["reasoning_effort"] = reasoning_effort
+
         try:
-            if tools:
-                response = cast(
-                    ChatCompletion,
-                    await client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        tools=tools,
-                        stream=request.stream,
-                    ),
-                )
-            else:
-                response = cast(
-                    ChatCompletion,
-                    await client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        stream=request.stream,
-                    ),
-                )
+            response = cast(
+                ChatCompletion,
+                await client.chat.completions.create(**create_kwargs),
+            )
         except RateLimitError as exc:
             return ProviderResponse(
                 finish_reason="error",
@@ -162,13 +172,27 @@ class OpenAIChatProvider(ChatProvider):
         content = message.content if isinstance(message.content, str) else None
         tool_calls = self._parse_tool_calls(message.tool_calls)
 
+        # Reasoning extraction
+        metadata: dict[str, object] = {"model": model}
+        
+        # DeepSeek reasoning_content
+        reasoning_content = getattr(message, "reasoning_content", None)
+        if reasoning_content:
+            metadata["reasoning"] = reasoning_content
+            
+        # OpenAI reasoning tokens
+        if response.usage and hasattr(response.usage, "completion_tokens_details"):
+            details = response.usage.completion_tokens_details
+            if hasattr(details, "reasoning_tokens") and details.reasoning_tokens:
+                metadata["reasoning_tokens"] = details.reasoning_tokens
+
         return ProviderResponse(
             content=content,
             messages=[
                 ChatMessage(
                     role="assistant",
                     content=content or "",
-                    metadata={"model": model},
+                    metadata=metadata,
                 )
             ],
             tool_calls=tool_calls,
@@ -180,6 +204,122 @@ class OpenAIChatProvider(ChatProvider):
             ),
             raw=response,
         )
+
+    async def _generate_via_responses(self, request: ProviderRequest) -> ProviderResponse:
+        client = self._require_client()
+        model = self._resolve_model(request)
+        if not model:
+            raise ValueError("OpenAI provider requires a model")
+
+        # This requires the responses experimental/new API. 
+        # For compatible providers, we use the standard attribute access.
+        try:
+            responses_api = getattr(client, "responses", None)
+            if not responses_api:
+                raise RuntimeError("OpenAI SDK does not support Responses API or provider does not implement it")
+
+            input_items = self._build_input_items(request)
+            tools = self._build_tools(request.tools)
+            
+            store = self.config.get("store", False)
+            reasoning_effort = self.config.get("reasoning_effort") or request.options.get("reasoning_effort")
+
+            create_kwargs: dict[str, object] = {
+                "model": model,
+                "input": input_items,
+                "store": store,
+            }
+            if tools:
+                create_kwargs["tools"] = tools
+            if reasoning_effort:
+                create_kwargs["reasoning_effort"] = reasoning_effort
+
+            response = await responses_api.create(**create_kwargs)
+            
+            # Parse responses API response (slightly different structure)
+            # Typically returns a Response object with 'output_items'
+            output_items = getattr(response, "output_items", [])
+            content = ""
+            tool_calls: list[ToolCall] = []
+            reasoning = ""
+
+            for item in output_items:
+                if item.type == "message" and item.role == "assistant":
+                    for part in item.content:
+                        if part.type == "text":
+                            content += part.text
+                        elif part.type == "reasoning":
+                            reasoning += part.reasoning
+                elif item.type == "function_call":
+                    tool_calls.append(ToolCall(
+                        id=item.call_id,
+                        name=item.name,
+                        arguments=json.loads(item.arguments) if isinstance(item.arguments, str) else item.arguments
+                    ))
+
+            metadata: dict[str, object] = {"model": model, "response_id": response.id}
+            if reasoning:
+                metadata["reasoning"] = reasoning
+
+            return ProviderResponse(
+                content=content,
+                messages=[ChatMessage(role="assistant", content=content, metadata=metadata)],
+                tool_calls=tool_calls,
+                finish_reason=getattr(response, "status", "completed"),
+                usage=TokenUsage(
+                    input_tokens=response.usage.input_tokens if hasattr(response, "usage") else 0,
+                    output_tokens=response.usage.output_tokens if hasattr(response, "usage") else 0,
+                    total_tokens=response.usage.total_tokens if hasattr(response, "usage") else 0,
+                ),
+                raw=response,
+            )
+        except Exception as exc:
+            return ProviderResponse(
+                finish_reason="error",
+                error=ProviderErrorInfo(code="responses_api_error", message=str(exc)),
+                raw=exc,
+            )
+
+    def _build_input_items(self, request: ProviderRequest) -> list[dict[str, object]]:
+        items: list[dict[str, object]] = []
+        
+        # System instructions
+        if request.system_prompt:
+            items.append({"type": "text", "text": request.system_prompt})
+            
+        # Initial prompt if any
+        if request.prompt:
+            items.append({"type": "user_message", "content": request.prompt})
+            
+        for message in request.messages:
+            role = message.role
+            content = message.content
+            
+            if role == "user":
+                items.append({"type": "user_message", "content": content})
+            elif role == "assistant":
+                # Convert tool calls to individual items if present
+                tool_calls = message.metadata.get("tool_calls")
+                if tool_calls:
+                    # Item-based API likes flat structure
+                    if content:
+                        items.append({"type": "message", "role": "assistant", "content": [{"type": "text", "text": content}]})
+                    for tc in tool_calls:
+                        items.append({
+                            "type": "function_call",
+                            "call_id": tc.get("id"),
+                            "name": tc.get("function", {}).get("name"),
+                            "arguments": tc.get("function", {}).get("arguments"),
+                        })
+                else:
+                    items.append({"type": "message", "role": "assistant", "content": [{"type": "text", "text": content}]})
+            elif role == "tool":
+                items.append({
+                    "type": "function_call_output",
+                    "call_id": message.metadata.get("tool_call_id"),
+                    "output": content
+                })
+        return items
 
     @override
     def provider_info(self) -> ProviderInfo:
@@ -224,13 +364,26 @@ class OpenAIChatProvider(ChatProvider):
                     cast(object, {"role": "user", "content": request.prompt}),
                 )
             )
-        for message in request.messages:
+        for idx, message in enumerate(request.messages):
+            role = message.role
+            content = message.content
             payload: dict[str, object] = {
-                "role": message.role,
-                "content": message.content,
+                "role": role,
+                "content": content,
             }
             if message.name:
                 payload["name"] = message.name
+            
+            # 处理 tool_calls (assistant)
+            tool_calls = message.metadata.get("tool_calls")
+            if role == "assistant" and tool_calls:
+                payload["tool_calls"] = tool_calls
+            
+            # 处理 tool_call_id (tool)
+            tool_call_id = message.metadata.get("tool_call_id")
+            if role == "tool" and tool_call_id:
+                payload["tool_call_id"] = tool_call_id
+
             messages.append(cast(ChatCompletionMessageParam, cast(object, payload)))
 
         # If image_urls present, transform the last user message into multimodal content

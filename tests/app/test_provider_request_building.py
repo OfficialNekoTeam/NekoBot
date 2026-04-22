@@ -65,9 +65,10 @@ class FakeChatProvider(ChatProvider):
         return ProviderResponse(content=request.prompt or "")
 
 
-def test_build_provider_request_coerces_messages_and_tools() -> None:
+@pytest.mark.asyncio
+async def test_build_provider_request_coerces_messages_and_tools() -> None:
     framework = FrameworkHarness()
-    provider_context = framework.build_provider_context(
+    provider_context = await framework.build_provider_context(
         provider_name="fake-chat",
         execution=framework.build_execution_context(
             platform="onebot",
@@ -110,7 +111,8 @@ def test_build_provider_request_coerces_messages_and_tools() -> None:
     assert request.options["temperature"] == 0.2
 
 
-def test_build_plugin_context_raises_when_plugin_disabled() -> None:
+@pytest.mark.asyncio
+async def test_build_plugin_context_raises_when_plugin_disabled() -> None:
     framework = FrameworkHarness()
     execution = framework.build_execution_context(
         platform="onebot",
@@ -124,7 +126,7 @@ def test_build_plugin_context_raises_when_plugin_disabled() -> None:
     )
 
     with pytest.raises(ValueError, match="plugin is disabled"):
-        _ = framework.build_plugin_context(
+        _ = await framework.build_plugin_context(
             plugin_name="demo",
             execution=execution,
             configuration=configuration,

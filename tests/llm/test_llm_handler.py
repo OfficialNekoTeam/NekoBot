@@ -1,17 +1,15 @@
 """Unit tests for packages.llm.handler — LLMHandler wake logic, command dispatch,
 image URL forwarding, retry/recall flow, and quoted message injection."""
+
 from __future__ import annotations
 
 from dataclasses import replace
 from typing import override
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from packages.app import NekoBotFramework
 from packages.contracts.specs import ProviderSpec, RegisteredProvider
 from packages.conversations.context import ConfigurationContext, ConversationContext
-from packages.conversations.models import ConversationKey, IsolationMode
 from packages.llm.handler import LLMHandler, _noop_recall
 from packages.providers.base import ChatProvider
 from packages.providers.types import (
@@ -20,7 +18,6 @@ from packages.providers.types import (
     ProviderResponse,
 )
 from packages.runtime.context import ExecutionContext
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -77,18 +74,14 @@ class SucceedAfterFirstProvider(ChatProvider):
     async def generate(self, request: ProviderRequest) -> ProviderResponse:
         type(self).calls += 1
         if type(self).calls == 1:
-            return ProviderResponse(
-                error=ProviderErrorInfo(code="rate_limit", message="slow down", retryable=True)
-            )
+            return ProviderResponse(error=ProviderErrorInfo(code="rate_limit", message="slow down", retryable=True))
         return ProviderResponse(content="retry-ok")
 
 
 def _make_framework(provider_class: type[ChatProvider] | None = None) -> NekoBotFramework:
     fw = NekoBotFramework()
     cls = provider_class or EchoProvider
-    fw.runtime_registry.register_provider(
-        RegisteredProvider(provider_class=cls, spec=cls.provider_spec())
-    )
+    fw.runtime_registry.register_provider(RegisteredProvider(provider_class=cls, spec=cls.provider_spec()))
     return fw
 
 
@@ -132,8 +125,8 @@ def _make_group_execution(*, self_id: str = "bot-99") -> ExecutionContext:
     )
 
 
-def _make_conversation(framework: NekoBotFramework, cfg: ConfigurationContext) -> ConversationContext:
-    return framework.build_conversation_context(_make_private_execution(), cfg)
+async def _make_conversation(framework: NekoBotFramework, cfg: ConfigurationContext) -> ConversationContext:
+    return await framework.build_conversation_context(_make_private_execution(), cfg)
 
 
 async def _run_handler(
@@ -156,7 +149,7 @@ async def _run_handler(
     fw = handler.framework
     cfg = configuration or _make_configuration(fw)
     exc = execution or _make_private_execution()
-    conv = conversation or _make_conversation(fw, cfg)
+    conv = conversation or await _make_conversation(fw, cfg)
 
     await handler.handle(
         payload=payload,
@@ -266,7 +259,7 @@ async def test_empty_plain_text_skipped() -> None:
 async def test_command_reset_clears_history() -> None:
     fw = _make_framework()
     cfg = _make_configuration(fw)
-    conv = _make_conversation(fw, cfg)
+    conv = await _make_conversation(fw, cfg)
     # Pre-populate history
     conv = replace(
         conv,
@@ -284,9 +277,7 @@ async def test_command_reset_clears_history() -> None:
     )
     assert any("[OK]" in r for r in replies)
     # History should be cleared in the framework's store after reset
-    stored = fw.conversation_store.get_conversation(
-        conv.conversation_key.value if conv.conversation_key else ""
-    )
+    stored = await fw.conversation_store.get_conversation(conv.conversation_key.value if conv.conversation_key else "")
     if stored is not None:
         assert stored.history == []
 
@@ -328,7 +319,7 @@ async def test_command_help_contains_key_commands() -> None:
 async def test_command_sid_shows_conversation_key() -> None:
     fw = _make_framework()
     cfg = _make_configuration(fw)
-    conv = _make_conversation(fw, cfg)
+    conv = await _make_conversation(fw, cfg)
     handler = LLMHandler(fw)
     replies = await _run_handler(
         handler,
@@ -377,9 +368,7 @@ async def test_image_urls_forwarded_to_invoke_provider() -> None:
 
     original_generate = EchoProvider.generate
 
-    async def capturing_generate(
-        self: EchoProvider, request: ProviderRequest
-    ) -> ProviderResponse:
+    async def capturing_generate(self: EchoProvider, request: ProviderRequest) -> ProviderResponse:
         captured_requests.append(request)
         return await original_generate(self, request)
 
@@ -426,7 +415,7 @@ async def test_no_image_urls_means_empty_list_in_provider() -> None:
 
 async def test_quoted_text_injected_into_messages() -> None:
     fw = _make_framework()
-    cfg = _make_configuration(fw)
+    _make_configuration(fw)
     captured: list[ProviderRequest] = []
 
     async def capturing_generate(self: EchoProvider, request: ProviderRequest) -> ProviderResponse:
@@ -479,7 +468,7 @@ async def test_retryable_error_triggers_retry() -> None:
         payload={"plain_text": "hello", "effective_text": "hello"},
         execution=_make_private_execution(),
         configuration=cfg,
-        conversation=_make_conversation(fw, cfg),
+        conversation=await _make_conversation(fw, cfg),
         reply=reply,
         recall=recall,
     )
@@ -514,7 +503,7 @@ async def test_non_retryable_error_no_retry() -> None:
         payload={"plain_text": "hello", "effective_text": "hello"},
         execution=_make_private_execution(),
         configuration=cfg,
-        conversation=_make_conversation(fw, cfg),
+        conversation=await _make_conversation(fw, cfg),
         reply=reply,
         recall=recall,
     )

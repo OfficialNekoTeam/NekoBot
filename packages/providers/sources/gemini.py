@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 from collections.abc import Awaitable, Callable
 from typing import cast, override
 
@@ -176,15 +178,90 @@ class GeminiChatProvider(ChatProvider):
 
     def _build_contents(self, request: ProviderRequest) -> list[types.Content]:
         contents: list[types.Content] = []
+        
+        # 助手方法：追加或合并 Part
+        def add_parts(role: str, parts: list[types.Part]) -> None:
+            gemini_role = "model" if role == "assistant" else "user"
+            if contents and contents[-1].role == gemini_role:
+                contents[-1].parts.extend(parts)
+            else:
+                contents.append(types.Content(role=gemini_role, parts=parts))
+
+        # 处理初始 prompt
         if request.prompt:
-            contents.append(
-                types.Content(role="user", parts=[types.Part(text=request.prompt)])
-            )
-        for message in request.messages:
-            role = "model" if message.role == "assistant" else message.role
-            contents.append(
-                types.Content(role=role, parts=[types.Part(text=message.content)])
-            )
+            initial_parts = [types.Part(text=request.prompt)]
+            add_parts("user", initial_parts)
+
+        # 处理历史消息
+        for idx, message in enumerate(request.messages):
+            role = message.role
+            content = message.content
+            parts: list[types.Part] = []
+
+            if role == "assistant":
+                if content:
+                    parts.append(types.Part(text=content))
+                
+                tool_calls = message.metadata.get("tool_calls")
+                if isinstance(tool_calls, list):
+                    for tc in tool_calls:
+                        import json
+                        args = tc.get("function", {}).get("arguments")
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except Exception:
+                                pass
+                        parts.append(types.Part.from_function_call(
+                            name=tc.get("function", {}).get("name"),
+                            args=args
+                        ))
+                add_parts("assistant", parts)
+            
+            elif role == "tool":
+                # Gemini requires tool results to be from the 'user' (as function_response)
+                tool_call_id = message.metadata.get("tool_call_id")
+                # Fallback to name if ID is missing (OpenAI style)
+                func_name = message.name or tool_call_id or "unknown_function"
+                parts.append(types.Part.from_function_response(
+                    name=func_name,
+                    response={"result": content}
+                ))
+                add_parts("tool", parts)
+            
+            else:
+                # User messages
+                user_parts = [types.Part(text=content)]
+                # 如果是最后一条 user 消息且有 image_urls
+                is_last_user = (role == "user" and not any(m.role == "user" for m in request.messages[idx+1:]))
+                if is_last_user and request.image_urls and not request.prompt:
+                    for url in request.image_urls:
+                        if url.startswith("data:"):
+                            try:
+                                header, data = url.split(",", 1)
+                                mime_type = header.split(";")[0].split(":")[1]
+                                user_parts.append(types.Part.from_bytes(
+                                    data=base64.b64decode(data),
+                                    mime_type=mime_type
+                                ))
+                            except Exception:
+                                continue
+                add_parts("user", user_parts)
+
+        # 针对末尾的 image_urls 特殊处理 (如果 prompt 存在)
+        if request.image_urls and request.prompt and contents and contents[0].role == "user":
+             for url in request.image_urls:
+                if url.startswith("data:"):
+                    try:
+                        header, data = url.split(",", 1)
+                        mime_type = header.split(";")[0].split(":")[1]
+                        contents[0].parts.append(types.Part.from_bytes(
+                            data=base64.b64decode(data),
+                            mime_type=mime_type
+                        ))
+                    except Exception:
+                        continue
+
         return contents
 
     def _build_tools(self, tools: list[ToolDefinition]) -> list[types.Tool]:

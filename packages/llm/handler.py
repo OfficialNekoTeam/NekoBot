@@ -5,12 +5,12 @@
 
 from __future__ import annotations
 
-import aiohttp
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+import aiohttp
 from loguru import logger
 
 from ..conversations.context import ConfigurationContext, ConversationContext
@@ -34,6 +34,7 @@ _PREF_PROVIDER = "preferred_provider"
 _PREF_GROUP_ENABLED = "group_reply_enabled"
 _PREF_BLACKLIST = "user_blacklist"
 _PREF_WHITELIST = "user_whitelist"
+_PREF_PERSONA = "persona"
 
 # config.json 里 plugin_configs 下的节名（保持向后兼容）
 _CONFIG_SECTION = "llm_chat"
@@ -122,10 +123,10 @@ class LLMHandler:
 
         # 群聊：回复总开关 + 黑/白名单
         if is_group:
-            if not self._is_group_reply_enabled(ctx):
+            if not await self._is_group_reply_enabled(ctx):
                 return
             actor_id = ctx.execution.actor_id
-            if actor_id and not self._is_user_allowed(ctx, actor_id):
+            if actor_id and not await self._is_user_allowed(ctx, actor_id):
                 return
 
         # 唤醒检查
@@ -143,11 +144,11 @@ class LLMHandler:
             return
 
         model = self._resolve_model(ctx)
-        system_prompt = self._get_system_prompt(ctx)
-        sender_info = self._extract_sender_info(ctx)
+        system_prompt = await self._get_system_prompt(ctx)
         effective = ctx.payload.get("effective_text")
         llm_text = effective if isinstance(effective, str) and effective else text
-        messages = self._build_messages(ctx, llm_text, sender_info=sender_info)
+        messages, extra_context = self._build_messages(ctx, llm_text, sender_info=sender_info)
+        system_prompt = await self._get_system_prompt(ctx, extra_context)
         raw_image_urls = ctx.payload.get("image_urls")
         image_urls: list[str] = (
             [u for u in raw_image_urls if isinstance(u, str)]
@@ -257,12 +258,14 @@ class LLMHandler:
             f"{p}llm provider <名称>     - 切换 Provider",
             f"{p}llm compress  - 压缩对话历史",
             f"{p}llm reset     - 恢复默认模型和 Provider",
+            f"{p}llm persona list|set <名称>|reset|info",
         ]
         if is_group:
             lines += [
                 f"{p}llm group on|off - 开启/关闭本群回复",
                 f"{p}llm blacklist add|rm|clr|ls <qq>",
                 f"{p}llm whitelist add|rm|clr|ls <qq>",
+                f"{p}llm persona group set <名称>|reset",
             ]
 
         # 自动聚合已注册插件的命令
@@ -357,7 +360,7 @@ class LLMHandler:
 
     async def _cmd_reset(self, ctx: _Ctx) -> None:
         cleared = replace(ctx.conversation, history=[], summary=None)
-        ctx.conversation = self.framework.save_conversation_context(cleared)
+        ctx.conversation = await self.framework.save_conversation_context(cleared)
         logger.info("llm: conversation reset for key={}", ctx.conversation.conversation_key)
         await ctx.reply("[OK] 对话历史已清空。")
 
@@ -371,6 +374,7 @@ class LLMHandler:
         _ADMIN_SUBS = {
             "on", "off", "model", "provider", "reset", "clearmodel",
             "compress", "summarize", "group", "blacklist", "whitelist",
+            "persona",
         }
         if sub in _ADMIN_SUBS and not self._check_permission(ctx.execution, "command.invoke"):
             await ctx.reply("[ERR] 权限不足。")
@@ -380,12 +384,12 @@ class LLMHandler:
 
         if sub == "off":
             prefs[_PREF_ENABLED] = False
-            ctx.conversation = self._save_prefs(ctx, prefs)
+            ctx.conversation = await self._save_prefs(ctx, prefs)
             await ctx.reply("[OFF] 已关闭自动回复，发送 /llm on 可重新开启。")
 
         elif sub == "on":
             prefs[_PREF_ENABLED] = True
-            ctx.conversation = self._save_prefs(ctx, prefs)
+            ctx.conversation = await self._save_prefs(ctx, prefs)
             await ctx.reply("[ON] 已开启自动回复。")
 
         elif sub == "model":
@@ -394,18 +398,18 @@ class LLMHandler:
                 await self._cmd_model_list(ctx)
             else:
                 prefs[_PREF_MODEL] = parts[1]
-                ctx.conversation = self._save_prefs(ctx, prefs)
+                ctx.conversation = await self._save_prefs(ctx, prefs)
                 await ctx.reply(f"[OK] 模型已切换为：{parts[1]}")
 
         elif sub == "provider" and len(parts) > 1:
             prefs[_PREF_PROVIDER] = parts[1]
-            ctx.conversation = self._save_prefs(ctx, prefs)
+            ctx.conversation = await self._save_prefs(ctx, prefs)
             await ctx.reply(f"[OK] Provider 已切换为：{parts[1]}")
 
         elif sub in ("reset", "clearmodel"):
             prefs.pop(_PREF_MODEL, None)
             prefs.pop(_PREF_PROVIDER, None)
-            ctx.conversation = self._save_prefs(ctx, prefs)
+            ctx.conversation = await self._save_prefs(ctx, prefs)
             await ctx.reply("[OK] 已恢复默认模型和 Provider。")
 
         elif sub in ("compress", "summarize"):
@@ -419,6 +423,9 @@ class LLMHandler:
 
         elif sub == "whitelist":
             await self._cmd_list_manage(ctx, _PREF_WHITELIST, parts)
+
+        elif sub == "persona":
+            await self._cmd_persona(ctx, parts[1:])
 
         else:
             await self._cmd_status(ctx, prefs)
@@ -436,13 +443,15 @@ class LLMHandler:
         is_group = ctx.execution.scope == "group"
         group_line = bl_line = wl_line = ""
         if is_group:
-            group_enabled = self._is_group_reply_enabled(ctx)
-            gs = self._load_group_settings(ctx)
+            group_enabled = await self._is_group_reply_enabled(ctx)
+            gs = await self._load_group_settings(ctx)
             bl = gs.provider_preferences.get(_PREF_BLACKLIST, [])
             wl = gs.provider_preferences.get(_PREF_WHITELIST, [])
             group_line = f"群回复: {'开启' if group_enabled else '关闭'}\n"
             bl_line = f"黑名单: {', '.join(str(u) for u in bl) or '(空)'}\n"  # type: ignore[union-attr]
             wl_line = f"白名单: {', '.join(str(u) for u in wl) or '(空)'}\n"  # type: ignore[union-attr]
+        persona_name = await self._get_active_persona_name(ctx)
+        persona_line = f"人设: {persona_name}\n" if persona_name else ""
         cmd_prefix = self._get_command_prefix(ctx)
         await ctx.reply(
             f"[LLM 状态]\n"
@@ -450,14 +459,111 @@ class LLMHandler:
             f"{group_line}{bl_line}{wl_line}"
             f"Provider: {provider}\n"
             f"模型: {model}\n"
+            f"{persona_line}"
             f"历史轮数: {turns}\n"
             f"有摘要: {'是' if has_summary else '否'}\n\n"
             f"{cmd_prefix}llm on|off\n"
             f"{cmd_prefix}llm group on|off\n"
             f"{cmd_prefix}llm blacklist/whitelist add|remove|clear|list <qq>\n"
             f"{cmd_prefix}llm model <名称> | {cmd_prefix}llm provider <名称>\n"
+            f"{cmd_prefix}llm persona list|set <名称>|reset\n"
             f"{cmd_prefix}llm compress | {cmd_prefix}reset"
         )
+
+    async def _cmd_persona(self, ctx: _Ctx, args: list[str]) -> None:
+        """人设管理命令。子命令：list / set <名称> / reset / info / group set|reset。"""
+        personas = await self._get_personas(ctx)
+        sub = args[0].lower() if args else "info"
+        is_group = ctx.execution.scope == "group"
+
+        if sub == "list":
+            if not personas:
+                await ctx.reply("[人设] 未配置任何人设（在 llm_chat.personas 中添加）。")
+                return
+            active = await self._get_active_persona_name(ctx)
+            lines = ["[人设列表]"]
+            for name, prompt in personas.items():
+                marker = " ✓" if active and active.startswith(name) else ""
+                preview = prompt[:40].replace("\n", " ")
+                lines.append(f"  {name}{marker}: {preview}{'...' if len(prompt) > 40 else ''}")
+            await ctx.reply("\n".join(lines))
+
+        elif sub == "set" and len(args) > 1:
+            name = args[1]
+            if name not in personas:
+                await ctx.reply(f"[ERR] 人设 {name!r} 不存在。可用: {', '.join(personas)}")
+                return
+            prefs = dict(ctx.conversation.provider_preferences)
+            prefs[_PREF_PERSONA] = name
+            ctx.conversation = await self._save_prefs(ctx, prefs)
+            await ctx.reply(f"[OK] 人设已切换为：{name}")
+
+        elif sub == "reset":
+            prefs = dict(ctx.conversation.provider_preferences)
+            prefs.pop(_PREF_PERSONA, None)
+            ctx.conversation = await self._save_prefs(ctx, prefs)
+            # 若在群聊，也同时清除群默认
+            if is_group:
+                gs = await self._load_group_settings(ctx)
+                gp = dict(gs.provider_preferences)
+                gp.pop(_PREF_PERSONA, None)
+                await self._save_group_settings(ctx, gs, gp)
+            await ctx.reply("[OK] 已恢复默认人设。")
+
+        elif sub == "info":
+            active_name = await self._get_active_persona_name(ctx)
+            active_text = await self._resolve_persona(ctx)
+            if not active_name:
+                # 可能用的是旧式 system_prompt
+                raw = ctx.config.get("system_prompt")
+                if isinstance(raw, str) and raw.strip():
+                    preview = raw[:120].replace("\n", " ")
+                    await ctx.reply(f"[人设] 使用旧式 system_prompt:\n{preview}{'...' if len(raw) > 120 else ''}")
+                else:
+                    await ctx.reply("[人设] 未配置人设。")
+                return
+            preview = (active_text or "")[:120].replace("\n", " ")
+            await ctx.reply(
+                f"[人设] 当前: {active_name}\n"
+                f"{preview}{'...' if active_text and len(active_text) > 120 else ''}"
+            )
+
+        elif sub == "group" and is_group:
+            # /llm persona group set <名称> | group reset
+            g_action = args[1].lower() if len(args) > 1 else ""
+            if g_action == "set" and len(args) > 2:
+                name = args[2]
+                if name not in personas:
+                    await ctx.reply(f"[ERR] 人设 {name!r} 不存在。可用: {', '.join(personas)}")
+                    return
+                gs = await self._load_group_settings(ctx)
+                gp = dict(gs.provider_preferences)
+                gp[_PREF_PERSONA] = name
+                await self._save_group_settings(ctx, gs, gp)
+                await ctx.reply(f"[OK] 本群默认人设已设为：{name}")
+            elif g_action == "reset":
+                gs = await self._load_group_settings(ctx)
+                gp = dict(gs.provider_preferences)
+                gp.pop(_PREF_PERSONA, None)
+                await self._save_group_settings(ctx, gs, gp)
+                await ctx.reply("[OK] 本群默认人设已重置。")
+            else:
+                await ctx.reply("用法：/llm persona group set <名称> | group reset")
+
+        else:
+            p = self._get_command_prefix(ctx)
+            lines = [
+                f"{p}llm persona list          - 列出所有人设",
+                f"{p}llm persona set <名称>    - 切换人设（当前会话）",
+                f"{p}llm persona reset         - 恢复默认人设",
+                f"{p}llm persona info          - 查看当前人设",
+            ]
+            if is_group:
+                lines += [
+                    f"{p}llm persona group set <名称>  - 设置本群默认人设",
+                    f"{p}llm persona group reset       - 重置本群默认人设",
+                ]
+            await ctx.reply("\n".join(lines))
 
     async def _cmd_list_manage(
         self, ctx: _Ctx, pref_key: str, parts: list[str]
@@ -470,7 +576,7 @@ class LLMHandler:
         _ACT_ALIASES: dict[str, str] = {"ls": "list", "rm": "remove", "clr": "clear", "del": "remove"}
         raw_action = parts[1].lower() if len(parts) > 1 else "list"
         action = _ACT_ALIASES.get(raw_action, raw_action)
-        gs = self._load_group_settings(ctx)
+        gs = await self._load_group_settings(ctx)
         prefs = dict(gs.provider_preferences)
         current: list[str] = list(prefs.get(pref_key, []))  # type: ignore[arg-type]
 
@@ -479,7 +585,7 @@ class LLMHandler:
             return
         if action == "clear":
             prefs[pref_key] = []
-            self._save_group_settings(ctx, gs, prefs)
+            await self._save_group_settings(ctx, gs, prefs)
             await ctx.reply(f"[OK] 已清空{label}。")
             return
         if len(parts) < 3:
@@ -492,13 +598,13 @@ class LLMHandler:
             if target_id not in current:
                 current.append(target_id)
             prefs[pref_key] = current
-            self._save_group_settings(ctx, gs, prefs)
+            await self._save_group_settings(ctx, gs, prefs)
             await ctx.reply(f"[OK] 已将 {target_id} 加入{label}。")
         elif action == "remove":
             if target_id in current:
                 current.remove(target_id)
                 prefs[pref_key] = current
-                self._save_group_settings(ctx, gs, prefs)
+                await self._save_group_settings(ctx, gs, prefs)
                 await ctx.reply(f"[OK] 已将 {target_id} 移出{label}。")
             else:
                 await ctx.reply(f"[ERR] {target_id} 不在{label}中。")
@@ -509,15 +615,15 @@ class LLMHandler:
         if ctx.execution.group_id is None:
             await ctx.reply("此命令仅在群聊中有效。")
             return
-        gs = self._load_group_settings(ctx)
+        gs = await self._load_group_settings(ctx)
         prefs = dict(gs.provider_preferences)
         if action == "off":
             prefs[_PREF_GROUP_ENABLED] = False
-            self._save_group_settings(ctx, gs, prefs)
+            await self._save_group_settings(ctx, gs, prefs)
             await ctx.reply("[OFF] 已关闭本群自动回复。")
         elif action == "on":
             prefs[_PREF_GROUP_ENABLED] = True
-            self._save_group_settings(ctx, gs, prefs)
+            await self._save_group_settings(ctx, gs, prefs)
             await ctx.reply("[ON] 已开启本群自动回复。")
         else:
             await ctx.reply("用法：/llm group on|off")
@@ -531,10 +637,10 @@ class LLMHandler:
         instance = ctx.execution.platform_instance_uuid or "default"
         return f"group_settings:{instance}:{group_id}"
 
-    def _load_group_settings(self, ctx: _Ctx) -> ConversationContext:
+    async def _load_group_settings(self, ctx: _Ctx) -> ConversationContext:
         group_id = ctx.execution.group_id or "global"
         key = self._group_settings_key(ctx)
-        stored = self.framework.conversation_store.get_conversation(key)
+        stored = await self.framework.conversation_store.get_conversation(key)
         if stored is not None:
             return stored
         return ConversationContext(
@@ -544,24 +650,24 @@ class LLMHandler:
             chat_id=group_id,
         )
 
-    def _save_group_settings(
+    async def _save_group_settings(
         self,
         ctx: _Ctx,
         existing: ConversationContext,
         prefs: dict[str, object],
     ) -> None:
-        self.framework.save_conversation_context(
+        await self.framework.save_conversation_context(
             replace(existing, provider_preferences=prefs)
         )
 
-    def _is_group_reply_enabled(self, ctx: _Ctx) -> bool:
+    async def _is_group_reply_enabled(self, ctx: _Ctx) -> bool:
         if ctx.execution.group_id is None:
             return True
-        gs = self._load_group_settings(ctx)
+        gs = await self._load_group_settings(ctx)
         return bool(gs.provider_preferences.get(_PREF_GROUP_ENABLED, True))
 
-    def _is_user_allowed(self, ctx: _Ctx, user_id: str) -> bool:
-        gs = self._load_group_settings(ctx)
+    async def _is_user_allowed(self, ctx: _Ctx, user_id: str) -> bool:
+        gs = await self._load_group_settings(ctx)
         prefs = gs.provider_preferences
         blacklist: list[object] = prefs.get(_PREF_BLACKLIST, [])  # type: ignore[assignment]
         if isinstance(blacklist, list) and user_id in blacklist:
@@ -655,15 +761,15 @@ class LLMHandler:
         user_text: str,
         *,
         sender_info: dict[str, str | None] | None = None,
-    ) -> list[dict[str, object]]:
+    ) -> tuple[list[dict[str, object]], str]:
         history_limit = self._get_config_int(ctx, "history_limit", _DEFAULT_HISTORY_LIMIT)
         messages: list[dict[str, object]] = []
 
+        # 不再向 messages 注入 role: system。改为生成 extra_context 字符串。
+        extra_parts: list[str] = []
+
         if ctx.conversation.summary:
-            messages.append({
-                "role": "system",
-                "content": f"[对话历史摘要]\n{ctx.conversation.summary}",
-            })
+            extra_parts.append(f"[对话历史摘要]\n{ctx.conversation.summary}")
 
         history = ctx.conversation.history
         cutoff = max(0, len(history) - history_limit * 2)
@@ -691,21 +797,21 @@ class LLMHandler:
                 ctx_parts.append(f"等级：{level}")
             if title:
                 ctx_parts.append(f"头衔：{title}")
-        messages.append({
-            "role": "system",
-            "content": "[当前上下文] " + "、".join(ctx_parts),
-        })
+        extra_parts.append("[当前环境数据] " + "、".join(ctx_parts))
 
         # 如果用户引用了一条消息，注入引用内容供 LLM 参考
         quoted_text = ctx.payload.get("quoted_text")
         if isinstance(quoted_text, str) and quoted_text.strip():
-            messages.append({
-                "role": "system",
-                "content": f"[引用消息]\n{quoted_text.strip()}",
-            })
+            extra_parts.append(f"[引用消息]\n{quoted_text.strip()}")
+
+        # 注入技能发现列表
+        skills = self.framework.skill_manager.skill_descriptions
+        if skills:
+            skill_lines = [f"- {s['name']}: {s['description']}" for s in skills]
+            extra_parts.append("[可用技能列表]\n" + "\n".join(skill_lines) + "\n(如需执行上述技能，请先调用 view_skill 工具查看详细指令)")
 
         messages.append({"role": "user", "content": user_text})
-        return messages
+        return messages, "\n\n".join(extra_parts)
 
     async def _save_history(
         self,
@@ -726,7 +832,7 @@ class LLMHandler:
                 ctx, new_history, provider_name, model
             )
         updated = replace(ctx.conversation, history=new_history, summary=summary)
-        ctx.conversation = self.framework.save_conversation_context(updated)
+        ctx.conversation = await self.framework.save_conversation_context(updated)
         logger.debug(
             "llm: saved history turns={} has_summary={}",
             len(new_history) // 2,
@@ -781,7 +887,7 @@ class LLMHandler:
             ctx, ctx.conversation.history, provider_name, model
         )
         updated = replace(ctx.conversation, history=new_history, summary=summary)
-        ctx.conversation = self.framework.save_conversation_context(updated)
+        ctx.conversation = await self.framework.save_conversation_context(updated)
         if summary:
             await ctx.reply(
                 f"[OK] 已压缩历史（保留最近 {_COMPRESS_KEEP_TURNS} 轮）\n"
@@ -869,9 +975,82 @@ class LLMHandler:
         pref = ctx.conversation.provider_preferences.get(_PREF_MODEL)
         return pref if isinstance(pref, str) and pref else None
 
-    def _get_system_prompt(self, ctx: _Ctx) -> str | None:
-        raw = ctx.config.get("system_prompt")
-        return raw if isinstance(raw, str) and raw.strip() else None
+    async def _get_system_prompt(self, ctx: _Ctx, extra_context: str = "") -> str:
+        persona_text = await self._resolve_persona(ctx)
+        if not persona_text:
+            # 向后兼容：直接配置的 system_prompt
+            raw = ctx.config.get("system_prompt")
+            persona_text = raw if isinstance(raw, str) and raw.strip() else "你是 NekoBot，一个由 Neko 开发的智能机器人。"
+
+        if extra_context:
+            return f"{persona_text}\n\n{extra_context}"
+        return persona_text
+
+    async def _get_personas(self, ctx: _Ctx) -> dict[str, str]:
+        """合并从 config 和 DB 读取的人设，返回 {name: prompt}。"""
+        # 1. 从 config 读取 (向后兼容)
+        res: dict[str, str] = {}
+        raw = ctx.config.get("personas")
+        if isinstance(raw, dict):
+            for k, v in raw.items():
+                if isinstance(k, str) and isinstance(v, str):
+                    res[k] = v
+        
+        # 2. 从 DB 读取 (动态管理)
+        try:
+            db_personas = await self.framework.conversation_store.list_personas()
+            res.update(db_personas)
+        except Exception as exc:
+            logger.warning("llm: failed to fetch personas from DB: {}", exc)
+            
+        return res
+
+    async def _resolve_persona(self, ctx: _Ctx) -> str | None:
+        """解析当前生效的人设文本。优先级：per-conversation > per-group > default_persona。"""
+        personas = await self._get_personas(ctx)
+        if not personas:
+            return None
+
+        # 1. per-conversation 偏好
+        pref = ctx.conversation.provider_preferences.get(_PREF_PERSONA)
+        if isinstance(pref, str) and pref in personas:
+            return personas[pref]
+
+        # 2. per-group 设置
+        if ctx.execution.group_id is not None:
+            gs = await self._load_group_settings(ctx)
+            group_pref = gs.provider_preferences.get(_PREF_PERSONA)
+            if isinstance(group_pref, str) and group_pref in personas:
+                return personas[group_pref]
+
+        # 3. config default_persona
+        default = ctx.config.get("default_persona")
+        if isinstance(default, str) and default in personas:
+            return personas[default]
+
+        return None
+
+    async def _get_active_persona_name(self, ctx: _Ctx) -> str | None:
+        """返回当前生效的人设名称，用于状态显示。"""
+        personas = await self._get_personas(ctx)
+        if not personas:
+            return None
+
+        pref = ctx.conversation.provider_preferences.get(_PREF_PERSONA)
+        if isinstance(pref, str) and pref in personas:
+            return pref
+
+        if ctx.execution.group_id is not None:
+            gs = await self._load_group_settings(ctx)
+            group_pref = gs.provider_preferences.get(_PREF_PERSONA)
+            if isinstance(group_pref, str) and group_pref in personas:
+                return f"{group_pref}(群默认)"
+
+        default = ctx.config.get("default_persona")
+        if isinstance(default, str) and default in personas:
+            return f"{default}(全局默认)"
+
+        return None
 
     def _extract_sender_info(self, ctx: _Ctx) -> dict[str, str | None]:
         sender = ctx.payload.get("sender")
@@ -897,9 +1076,9 @@ class LLMHandler:
             "title": _s("title"),
         }
 
-    def _save_prefs(self, ctx: _Ctx, prefs: dict[str, object]) -> ConversationContext:
+    async def _save_prefs(self, ctx: _Ctx, prefs: dict[str, object]) -> ConversationContext:
         updated = replace(ctx.conversation, provider_preferences=prefs)
-        return self.framework.save_conversation_context(updated)
+        return await self.framework.save_conversation_context(updated)
 
     def _get_command_prefix(self, ctx: _Ctx) -> str:
         val = ctx.configuration.framework_config.get("command_prefix")

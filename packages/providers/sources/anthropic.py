@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 from typing import cast, override
 
 from anthropic import (
@@ -92,6 +94,87 @@ class AnthropicChatProvider(ChatProvider):
     async def teardown(self) -> None:
         self._client = None
 
+    async def _build_messages(self, request: ProviderRequest) -> list[MessageParam]:
+        messages: list[MessageParam] = []
+        
+        # 处理初始 prompt
+        if request.prompt:
+            content = await self._build_multimodal_content(request.prompt, request.image_urls) if request.image_urls else request.prompt
+            messages.append(
+                cast(MessageParam, {"role": "user", "content": content})
+            )
+
+        # 处理历史消息
+        for idx, message in enumerate(request.messages):
+            role = message.role
+            content: str | list[dict[str, object]] = message.content
+            
+            # 如果是最后一条 user 消息且有 image_urls
+            is_last_user = (role == "user" and not any(m.role == "user" for m in request.messages[idx+1:]))
+            if is_last_user and request.image_urls and not request.prompt:
+                content = await self._build_multimodal_content(message.content, request.image_urls)
+
+            if role == "assistant":
+                blocks: list[dict[str, object]] = []
+                if content:
+                    blocks.append({"type": "text", "text": cast(str, content)})
+                
+                tool_calls = message.metadata.get("tool_calls")
+                if isinstance(tool_calls, list):
+                    for tc in tool_calls:
+                        blocks.append({
+                            "type": "tool_use",
+                            "id": tc.get("id"),
+                            "name": tc.get("function", {}).get("name"),
+                            "input": base64.b64decode(tc.get("function", {}).get("arguments")) if isinstance(tc.get("function", {}).get("arguments"), bytes) else tc.get("function", {}).get("arguments"),
+                        })
+                        # Handle string arguments
+                        if isinstance(blocks[-1]["input"], str):
+                            try:
+                                blocks[-1]["input"] = json.loads(blocks[-1]["input"])
+                            except Exception:
+                                pass
+                
+                messages.append(cast(MessageParam, {"role": "assistant", "content": blocks}))
+            
+            elif role == "tool":
+                # Claude requires tool results to be in a 'user' message as tool_result blocks
+                messages.append(cast(MessageParam, {
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": message.metadata.get("tool_call_id"),
+                        "content": content,
+                    }]
+                }))
+            
+            else:
+                messages.append(cast(MessageParam, {"role": role, "content": content}))
+                
+        return messages
+
+    async def _build_multimodal_content(self, text: str | None, image_urls: list[str]) -> list[dict[str, object]]:
+        content: list[dict[str, object]] = []
+        if text:
+            content.append({"type": "text", "text": text})
+        
+        for url in image_urls:
+            if url.startswith("data:"):
+                try:
+                    header, data = url.split(",", 1)
+                    mime_type = header.split(";")[0].split(":")[1]
+                    content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": mime_type,
+                            "data": data,
+                        }
+                    })
+                except Exception:
+                    continue
+        return content
+
     @override
     async def generate(self, request: ProviderRequest) -> ProviderResponse:
         client = self._require_client()
@@ -99,59 +182,25 @@ class AnthropicChatProvider(ChatProvider):
         if not model:
             raise ValueError("Anthropic provider requires a model")
 
-        messages = self._build_messages(request)
+        messages = await self._build_messages(request)
         system = request.system_prompt or cast(
             str | None, request.options.get("system")
         )
         tools = self._build_tools(request.tools)
 
+        create_kwargs: dict[str, object] = dict(
+            model=model,
+            max_tokens=self._resolve_max_tokens(request),
+            messages=messages,
+            stream=request.stream,
+        )
+        if system is not None:
+            create_kwargs["system"] = system
+        if tools:
+            create_kwargs["tools"] = tools
+
         try:
-            if tools:
-                if system is not None:
-                    response = cast(
-                        Message,
-                        await client.messages.create(
-                            model=model,
-                            max_tokens=self._resolve_max_tokens(request),
-                            messages=messages,
-                            system=system,
-                            tools=tools,
-                            stream=request.stream,
-                        ),
-                    )
-                else:
-                    response = cast(
-                        Message,
-                        await client.messages.create(
-                            model=model,
-                            max_tokens=self._resolve_max_tokens(request),
-                            messages=messages,
-                            tools=tools,
-                            stream=request.stream,
-                        ),
-                    )
-            else:
-                if system is not None:
-                    response = cast(
-                        Message,
-                        await client.messages.create(
-                            model=model,
-                            max_tokens=self._resolve_max_tokens(request),
-                            messages=messages,
-                            system=system,
-                            stream=request.stream,
-                        ),
-                    )
-                else:
-                    response = cast(
-                        Message,
-                        await client.messages.create(
-                            model=model,
-                            max_tokens=self._resolve_max_tokens(request),
-                            messages=messages,
-                            stream=request.stream,
-                        ),
-                    )
+            response = cast(Message, await client.messages.create(**create_kwargs))
         except RateLimitError as exc:
             return ProviderResponse(
                 finish_reason="error",

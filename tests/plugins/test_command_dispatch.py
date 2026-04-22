@@ -1,33 +1,24 @@
 """Tests for @command decorator dispatch and PluginReloader."""
 from __future__ import annotations
 
-from typing import override
-
 from packages.app import NekoBotFramework
-from packages.contracts.specs import (
-    EventHandlerSpec,
-    PluginSpec,
-    RegisteredPlugin,
-)
 from packages.decorators import command, event_handler, plugin
 from packages.platforms.onebot_v11.dispatch import OneBotV11Dispatcher
 from packages.platforms.onebot_v11.message_codec import OneBotV11MessageCodec
-from packages.platforms.onebot_v11.types import OneBotV11Event, OneBotV11Scene
+from packages.platforms.types import PlatformEvent, Scene
 from packages.plugins import BasePlugin, PluginReloader
-from packages.runtime.context import PluginContext
-from packages.schema import SchemaRegistry
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _event(plain_text: str = "", *, self_id: str = "bot") -> OneBotV11Event:
-    return OneBotV11Event(
+def _event(plain_text: str = "", *, self_id: str = "bot") -> PlatformEvent:
+    return PlatformEvent(
         event_type="message",
         event_name="message.group",
-        scene=OneBotV11Scene.GROUP,
+        scene=Scene.GROUP,
+        platform="onebot",
         platform_instance_uuid="inst-1",
         self_id=self_id,
         user_id="user-1",

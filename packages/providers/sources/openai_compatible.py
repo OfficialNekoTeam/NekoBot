@@ -14,6 +14,9 @@ OPENAI_COMPATIBLE_PROVIDER_SCHEMA = ObjectSchema(
         "api_key": StringField(min_length=1),
         "base_url": StringField(min_length=1),
         "default_model": StringField(required=False),
+        "api_flavor": StringField(required=False),
+        "store": BooleanField(required=False),
+        "reasoning_effort": StringField(required=False),
         "timeout_seconds": IntegerField(required=False, minimum=1),
         "enable_streaming": BooleanField(required=False),
     }
@@ -37,6 +40,8 @@ class OpenAICompatibleChatProvider(OpenAIChatProvider):
             api_key=cast(str, self.config.get("api_key")),
             base_url=cast(str, self.config.get("base_url")),
             timeout=cast(int | None, self.config.get("timeout_seconds")),
+            organization=cast(str | None, self.config.get("organization")),
+            project=cast(str | None, self.config.get("project")),
         )
 
     @override

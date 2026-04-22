@@ -19,7 +19,6 @@ Usage::
 
 from __future__ import annotations
 
-import asyncio
 import functools
 from typing import TYPE_CHECKING, Any
 
@@ -56,25 +55,20 @@ class PluginMCPServer:
         defs = self._tool_registry.get_tool_definitions()
         current_names = {d.name for d in defs}
 
-        # Remove tools that no longer exist
+        # Remove tools that no longer exist — uses public SDK API
         for name in self._registered_names - current_names:
-            try:
-                self._mcp._tool_manager._tools.pop(name, None)
-                logger.debug("PluginMCPServer: removed tool {!r}", name)
-            except Exception:
-                pass
+            self._mcp.remove_tool(name)
+            logger.debug("PluginMCPServer: removed tool {!r}", name)
 
-        # Add or update tools
+        # Add tools not yet registered
         for entry_list in self._tool_registry._plugin_tools.values():
             for entry in entry_list:
                 if entry.name in self._registered_names:
                     continue
                 self._add_tool(entry.name, entry.description, entry.handler)
 
-        self._registered_names = {
-            name
-            for name in self._mcp._tool_manager._tools
-        }
+        # Reflect actual registered state via public list_tools()
+        self._registered_names = {t.name for t in self._mcp.list_tools()}
         logger.info(
             "PluginMCPServer: synced {} tool(s)", len(self._registered_names)
         )
@@ -174,4 +168,4 @@ class PluginMCPServer:
 
     @property
     def tool_names(self) -> list[str]:
-        return list(self._registered_names)
+        return [t.name for t in self._mcp.list_tools()]
