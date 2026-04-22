@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Protocol, TypeAlias
 import aiohttp
 from loguru import logger
 
+from ...utils.url_guard import is_safe_url
+
 from ...app import NekoBotFramework
 from ...conversations.context import ConfigurationContext
 from ...platforms.dispatcher import BaseDispatcher
@@ -208,7 +210,7 @@ class OneBotV11Dispatcher(BaseDispatcher):
         for seg in event.segments:
             if seg.type == SegmentType.VOICE:
                 url = seg.data.get("url") or seg.data.get("file", "")
-                if isinstance(url, str) and url.startswith("http"):
+                if isinstance(url, str) and is_safe_url(url):
                     audio_url = url
                     break
 
@@ -265,7 +267,7 @@ class OneBotV11Dispatcher(BaseDispatcher):
         for seg in event.segments:
             if seg.type == SegmentType.IMAGE:
                 url = seg.data.get("url") or seg.data.get("file", "")
-                if isinstance(url, str) and url.startswith("http"):
+                if isinstance(url, str) and is_safe_url(url):
                     image_urls.append(url)
 
         # 2. Reply segment — fetch referenced message once

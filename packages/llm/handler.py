@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import aiohttp
 from loguru import logger
 
+from ..utils.url_guard import is_safe_url
 from ..conversations.context import ConfigurationContext, ConversationContext
 from ..conversations.models import ConversationKey, IsolationMode
 from ..providers.types import ProviderResponse
@@ -147,6 +148,7 @@ class LLMHandler:
         system_prompt = await self._get_system_prompt(ctx)
         effective = ctx.payload.get("effective_text")
         llm_text = effective if isinstance(effective, str) and effective else text
+        sender_info = self._extract_sender_info(ctx)
         messages, extra_context = self._build_messages(ctx, llm_text, sender_info=sender_info)
         system_prompt = await self._get_system_prompt(ctx, extra_context)
         raw_image_urls = ctx.payload.get("image_urls")
@@ -923,6 +925,9 @@ class LLMHandler:
             return
 
         url = base_url.rstrip("/") + "/models"
+        if not is_safe_url(url):
+            await ctx.reply(f"[ERR] {provider_name} 的 base_url 指向内网地址，已拒绝请求。")
+            return
         headers = {"Authorization": f"Bearer {api_key}"}
         try:
             async with aiohttp.ClientSession() as session:
