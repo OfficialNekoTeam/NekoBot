@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 from typing import cast, override
 
@@ -300,24 +301,6 @@ class AnthropicChatProvider(ChatProvider):
         if isinstance(default_tokens, int) and default_tokens > 0:
             return default_tokens
         return 1024
-
-    def _build_messages(self, request: ProviderRequest) -> list[MessageParam]:
-        messages: list[MessageParam] = []
-        if request.prompt:
-            messages.append(
-                cast(
-                    MessageParam,
-                    cast(object, {"role": "user", "content": request.prompt}),
-                )
-            )
-        for message in request.messages:
-            messages.append(
-                cast(
-                    MessageParam,
-                    cast(object, {"role": message.role, "content": message.content}),
-                )
-            )
-        return messages
 
     def _build_tools(self, tools: list[ToolDefinition]) -> list[ToolUnionParam]:
         payloads: list[ToolUnionParam] = []

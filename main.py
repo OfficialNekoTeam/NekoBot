@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 
 from loguru import logger
@@ -41,8 +42,9 @@ async def async_main(
     runtime = await bootstrap_runtime(config)
 
     # 优先级：CLI/显式参数 > 配置项 > 默认值
-    final_host = host or runtime.framework.config.get("web_host") or "0.0.0.0"
-    final_port = port or runtime.framework.config.get("web_port") or 6285
+    fw_cfg = runtime.configuration.framework_config
+    final_host = host or fw_cfg.get("web_host") or "0.0.0.0"
+    final_port = port or fw_cfg.get("web_port") or 6285
 
     web_task: asyncio.Task[None] | None = None
     if enable_webui:
@@ -68,7 +70,6 @@ async def async_main(
 
 def _resolve_webui_flag(cli_value: bool | None) -> bool:
     """解析 WebUI 开关：CLI 参数 > 环境变量 NEKOBOT_WEBUI > 默认值 True。"""
-    import os
     if cli_value is not None:
         return cli_value
     env = os.environ.get("NEKOBOT_WEBUI", "").strip().lower()
