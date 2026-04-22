@@ -739,10 +739,16 @@ class LLMHandler:
         for seg in segments:
             if not isinstance(seg, dict):
                 continue
-            if seg.get("type") == "at":
-                data = seg.get("data", {})
-                if isinstance(data, dict) and str(data.get("qq", "")) == self_id:
-                    return True
+            seg_type = seg.get("type")
+            data = seg.get("data", {})
+            if not isinstance(data, dict):
+                continue
+            # Normalised platform format: type="mention", data.user_id
+            if seg_type == "mention" and str(data.get("user_id", "")) == self_id:
+                return True
+            # Raw OB11 format (fallback): type="at", data.qq
+            if seg_type == "at" and str(data.get("qq", "")) == self_id:
+                return True
         return False
 
     def _strip_at_prefix(self, text: str, self_id: str) -> str:

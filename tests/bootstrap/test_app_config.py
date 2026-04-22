@@ -8,6 +8,7 @@ from packages.bootstrap.config import (
     load_app_config,
     normalize_app_config,
 )
+from packages.bootstrap.defaults import INITIAL_CONFIG_TEMPLATE
 
 
 def test_normalize_app_config_splits_framework_and_platform_data() -> None:
@@ -42,7 +43,7 @@ def test_normalize_app_config_splits_framework_and_platform_data() -> None:
 def test_load_app_config_returns_defaults_when_file_missing(tmp_path: Path) -> None:
     config = load_app_config(tmp_path / "missing.json")
 
-    assert config == BootstrapConfig()
+    assert config == normalize_app_config(INITIAL_CONFIG_TEMPLATE)
 
 
 def test_load_app_config_reads_json_file(tmp_path: Path) -> None:
@@ -59,5 +60,6 @@ def test_load_app_config_reads_json_file(tmp_path: Path) -> None:
 
     config = load_app_config(config_path)
 
-    assert config.framework_config == {"default_provider": "gemini"}
+    # check_config_integrity merges DEFAULT_CONFIG fields in, so use subset check
+    assert config.framework_config.get("default_provider") == "gemini"
     assert config.platforms == [{"type": "onebot_v11", "instance_uuid": "bot-a"}]

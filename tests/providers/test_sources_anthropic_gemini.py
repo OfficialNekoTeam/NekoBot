@@ -17,8 +17,8 @@ class AnthropicHarness(AnthropicChatProvider):
     def resolve_max_tokens_for_test(self, request: ProviderRequest) -> int:
         return self._resolve_max_tokens(request)
 
-    def build_messages_for_test(self, request: ProviderRequest):
-        return self._build_messages(request)
+    async def build_messages_for_test(self, request: ProviderRequest):
+        return await self._build_messages(request)
 
     def build_tools_for_test(self, tools: list[ToolDefinition]):
         return self._build_tools(tools)
@@ -90,7 +90,7 @@ def test_anthropic_resolve_max_tokens_prefers_request_then_config_then_default()
     )
 
 
-def test_anthropic_build_messages_and_tools() -> None:
+async def test_anthropic_build_messages_and_tools() -> None:
     provider = AnthropicHarness(config={"api_key": "x"})
     request = ProviderRequest(
         prompt="hello",
@@ -102,7 +102,7 @@ def test_anthropic_build_messages_and_tools() -> None:
         ],
     )
 
-    messages = provider.build_messages_for_test(request)
+    messages = await provider.build_messages_for_test(request)
     tools = provider.build_tools_for_test(request.tools)
     first_message = cast(dict[str, object], cast(object, messages[0]))
     second_message = cast(dict[str, object], cast(object, messages[1]))
