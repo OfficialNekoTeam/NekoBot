@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .bootstrap.config import BootstrapConfig
 
 from .conversations import (
     ConfigurationContext,
@@ -43,10 +47,9 @@ from .runtime import (
 from .runtime import context as runtime_context
 from .runtime.context import ExecutionContext, PluginContext
 from .schema import ObjectSchema, SchemaRegistry
+from .skills.manager import SkillManager
 from .tools import ToolRegistry
 from .tools.mcp.manager import MCPManager
-from .skills.manager import SkillManager
-from .bootstrap.config import BootstrapConfig, save_app_config, load_app_config
 
 
 class NekoBotFramework:
@@ -89,6 +92,7 @@ class NekoBotFramework:
 
     async def update_framework_config(self, new_config: BootstrapConfig) -> None:
         """原子更新全局配置并触发观察者。"""
+        from .bootstrap.config import save_app_config  # lazy: avoids app ↔ bootstrap circular import
         save_app_config(new_config)
         for observer in self._config_observers:
             await observer(new_config)

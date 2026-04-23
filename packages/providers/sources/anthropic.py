@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import json
-
 from typing import cast, override
 
 from anthropic import (
@@ -93,14 +92,20 @@ class AnthropicChatProvider(ChatProvider):
 
     @override
     async def teardown(self) -> None:
-        self._client = None
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def _build_messages(self, request: ProviderRequest) -> list[MessageParam]:
         messages: list[MessageParam] = []
         
         # 处理初始 prompt
         if request.prompt:
-            content = await self._build_multimodal_content(request.prompt, request.image_urls) if request.image_urls else request.prompt
+            content = (
+                await self._build_multimodal_content(request.prompt, request.image_urls)
+                if request.image_urls
+                else request.prompt
+            )
             messages.append(
                 cast(MessageParam, {"role": "user", "content": content})
             )
@@ -127,7 +132,11 @@ class AnthropicChatProvider(ChatProvider):
                             "type": "tool_use",
                             "id": tc.get("id"),
                             "name": tc.get("function", {}).get("name"),
-                            "input": base64.b64decode(tc.get("function", {}).get("arguments")) if isinstance(tc.get("function", {}).get("arguments"), bytes) else tc.get("function", {}).get("arguments"),
+                            "input": (
+                                base64.b64decode(tc.get("function", {}).get("arguments"))
+                                if isinstance(tc.get("function", {}).get("arguments"), bytes)
+                                else tc.get("function", {}).get("arguments")
+                            ),
                         })
                         # Handle string arguments
                         if isinstance(blocks[-1]["input"], str):

@@ -8,14 +8,13 @@ from typing import TYPE_CHECKING, Protocol, TypeAlias
 import aiohttp
 from loguru import logger
 
-from ...utils.url_guard import is_safe_url
-
 from ...app import NekoBotFramework
 from ...conversations.context import ConfigurationContext
 from ...platforms.dispatcher import BaseDispatcher
 from ...platforms.types import PlatformEvent, SegmentType
 from ...providers.types import STTRequest
 from ...runtime.context import ExecutionContext
+from ...utils.url_guard import is_safe_url
 from .message_codec import OneBotV11MessageCodec
 from .types import (
     OneBotV11MessageSegment,

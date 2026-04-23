@@ -434,10 +434,7 @@ async def test_quoted_text_injected_into_messages() -> None:
         )
 
     assert len(captured) == 1
-    # Should have a system message containing the quoted text
-    system_msgs = [m for m in captured[0].messages if m.role == "system"]
-    quoted_sys = [m for m in system_msgs if "original quoted content here" in m.content]
-    assert quoted_sys, "quoted_text not found in system messages"
+    assert "original quoted content here" in (captured[0].system_prompt or "")
 
 
 # ===========================================================================
