@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -66,6 +67,14 @@ class LLMHandler:
 
     def __init__(self, framework: NekoBotFramework) -> None:
         self.framework = framework
+        # Per-conversation serialization: same key → sequential, different keys → parallel.
+        # Locks are created lazily and retained for the lifetime of the handler.
+        self._conv_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_conv_lock(self, key: str) -> asyncio.Lock:
+        if key not in self._conv_locks:
+            self._conv_locks[key] = asyncio.Lock()
+        return self._conv_locks[key]
 
     async def handle(
         self,
@@ -87,7 +96,10 @@ class LLMHandler:
             recall=recall or _noop_recall,
             config=config,
         )
-        await self._handle_message(ctx)
+        conv_key = str(conversation.conversation_key) if conversation.conversation_key else ""
+        lock = self._get_conv_lock(conv_key)
+        async with lock:
+            await self._handle_message(ctx)
 
     # ------------------------------------------------------------------
     # 主入口
