@@ -739,10 +739,16 @@ class LLMHandler:
         for seg in segments:
             if not isinstance(seg, dict):
                 continue
-            if seg.get("type") == "at":
-                data = seg.get("data", {})
-                if isinstance(data, dict) and str(data.get("qq", "")) == self_id:
-                    return True
+            seg_type = seg.get("type")
+            data = seg.get("data", {})
+            if not isinstance(data, dict):
+                continue
+            # Normalised platform format: type="mention", data.user_id
+            if seg_type == "mention" and str(data.get("user_id", "")) == self_id:
+                return True
+            # Raw OB11 format (fallback): type="at", data.qq
+            if seg_type == "at" and str(data.get("qq", "")) == self_id:
+                return True
         return False
 
     def _strip_at_prefix(self, text: str, self_id: str) -> str:
@@ -810,7 +816,8 @@ class LLMHandler:
         skills = self.framework.skill_manager.skill_descriptions
         if skills:
             skill_lines = [f"- {s['name']}: {s['description']}" for s in skills]
-            extra_parts.append("[可用技能列表]\n" + "\n".join(skill_lines) + "\n(如需执行上述技能，请先调用 view_skill 工具查看详细指令)")
+            suffix = "\n(如需执行上述技能，请先调用 view_skill 工具查看详细指令)"
+            extra_parts.append("[可用技能列表]\n" + "\n".join(skill_lines) + suffix)
 
         messages.append({"role": "user", "content": user_text})
         return messages, "\n\n".join(extra_parts)
@@ -985,7 +992,10 @@ class LLMHandler:
         if not persona_text:
             # 向后兼容：直接配置的 system_prompt
             raw = ctx.config.get("system_prompt")
-            persona_text = raw if isinstance(raw, str) and raw.strip() else "你是 NekoBot，一个由 Neko 开发的智能机器人。"
+            persona_text = (
+                raw if isinstance(raw, str) and raw.strip()
+                else "你是 NekoBot，一个由 Neko 开发的智能机器人。"
+            )
 
         if extra_context:
             return f"{persona_text}\n\n{extra_context}"

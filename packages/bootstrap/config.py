@@ -8,6 +8,7 @@ from typing import Any, cast
 from loguru import logger
 
 from ..providers.types import ValueMap
+from .crypto import decrypt_secrets, encrypt_secrets
 from .defaults import DEFAULT_CONFIG, INITIAL_CONFIG_TEMPLATE
 
 ScopedValueMap = dict[str, ValueMap]
@@ -26,9 +27,6 @@ class BootstrapConfig:
 
 
 DEFAULT_CONFIG_PATH = Path("data/config.json")
-
-
-from .crypto import decrypt_secrets, encrypt_secrets
 
 
 def load_app_config(path: str | Path | None = None) -> BootstrapConfig:

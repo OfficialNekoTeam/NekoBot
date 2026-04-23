@@ -101,7 +101,11 @@ class AnthropicChatProvider(ChatProvider):
         
         # 处理初始 prompt
         if request.prompt:
-            content = await self._build_multimodal_content(request.prompt, request.image_urls) if request.image_urls else request.prompt
+            content = (
+                await self._build_multimodal_content(request.prompt, request.image_urls)
+                if request.image_urls
+                else request.prompt
+            )
             messages.append(
                 cast(MessageParam, {"role": "user", "content": content})
             )
@@ -128,7 +132,11 @@ class AnthropicChatProvider(ChatProvider):
                             "type": "tool_use",
                             "id": tc.get("id"),
                             "name": tc.get("function", {}).get("name"),
-                            "input": base64.b64decode(tc.get("function", {}).get("arguments")) if isinstance(tc.get("function", {}).get("arguments"), bytes) else tc.get("function", {}).get("arguments"),
+                            "input": (
+                                base64.b64decode(tc.get("function", {}).get("arguments"))
+                                if isinstance(tc.get("function", {}).get("arguments"), bytes)
+                                else tc.get("function", {}).get("arguments")
+                            ),
                         })
                         # Handle string arguments
                         if isinstance(blocks[-1]["input"], str):

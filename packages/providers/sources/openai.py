@@ -303,7 +303,10 @@ class OpenAIChatProvider(ChatProvider):
                 if tool_calls:
                     # Item-based API likes flat structure
                     if content:
-                        items.append({"type": "message", "role": "assistant", "content": [{"type": "text", "text": content}]})
+                        items.append({
+                            "type": "message", "role": "assistant",
+                            "content": [{"type": "text", "text": content}],
+                        })
                     for tc in tool_calls:
                         items.append({
                             "type": "function_call",
@@ -312,7 +315,10 @@ class OpenAIChatProvider(ChatProvider):
                             "arguments": tc.get("function", {}).get("arguments"),
                         })
                 else:
-                    items.append({"type": "message", "role": "assistant", "content": [{"type": "text", "text": content}]})
+                    items.append({
+                        "type": "message", "role": "assistant",
+                        "content": [{"type": "text", "text": content}],
+                    })
             elif role == "tool":
                 items.append({
                     "type": "function_call_output",
