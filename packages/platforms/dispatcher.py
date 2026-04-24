@@ -215,8 +215,8 @@ class BaseDispatcher(ABC):
                 execution=execution,
                 configuration=cfg,
                 conversation=conversation,
-                reply=self._make_reply_callable(event),
-                recall=self._make_recall_callable(event),
+                reply=reply_callable,
+                recall=recall_callable,
             )
 
         return contexts

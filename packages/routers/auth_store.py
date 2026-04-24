@@ -92,3 +92,11 @@ async def update_password(
         (hashed, username),
     )
     await db.commit()
+
+
+async def close_auth_db() -> None:
+    global _conn, _initialized
+    if _conn is not None:
+        await _conn.close()
+        _conn = None
+        _initialized = False
