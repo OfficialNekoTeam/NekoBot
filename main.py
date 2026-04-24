@@ -20,8 +20,9 @@ def _configure_logging() -> None:
         level="INFO",
         colorize=True,
     )
+    log_dir = os.environ.get("NEKOBOT_LOG_DIR", "data/logs")
     logger.add(
-        "data/logs/nekobot_{time:YYYY-MM-DD}.log",
+        f"{log_dir}/nekobot_{{time:YYYY-MM-DD}}.log",
         format="{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}",
         level="DEBUG",
         rotation="00:00",

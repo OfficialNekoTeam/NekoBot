@@ -65,9 +65,11 @@ class NekoBotFramework:
         )
         self.binder: FrameworkBinder = FrameworkBinder(self.runtime_registry)
         self.conversation_resolver: ConversationResolver = ConversationResolver()
+        import os
+        _db_path = os.environ.get("NEKOBOT_DB_PATH", "data/conversations.sqlite3")
         self.conversation_store: ConversationStore = (
             conversation_store
-            or SQLiteConversationStore(Path("data/conversations.sqlite3"))
+            or SQLiteConversationStore(Path(_db_path))
         )
         self.moderation_service: ModerationService = ModerationService()
         self.provider_registry: ProviderRegistry = ProviderRegistry(

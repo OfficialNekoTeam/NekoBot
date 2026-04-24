@@ -38,6 +38,7 @@ class InMemoryConversationStore:
         self.max_size = max_size
         self._conversations: collections.OrderedDict[str, ConversationContext] = collections.OrderedDict()
         self._sessions: collections.OrderedDict[str, ConversationContext] = collections.OrderedDict()
+        self._personas: dict[str, str] = {}
 
     async def get_conversation(self, conversation_key: str) -> ConversationContext | None:
         context = self._conversations.get(conversation_key)
@@ -78,16 +79,16 @@ class InMemoryConversationStore:
         return tuple(sorted(self._conversations.keys()))
 
     async def get_persona(self, name: str) -> str | None:
-        return None  # TODO: 实现内存在线管理？（可选）
+        return self._personas.get(name)
 
     async def save_persona(self, name: str, prompt: str) -> None:
-        pass
+        self._personas[name] = prompt
 
     async def list_personas(self) -> dict[str, str]:
-        return {}
+        return dict(self._personas)
 
     async def delete_persona(self, name: str) -> None:
-        pass
+        self._personas.pop(name, None)
 
 
 class SQLiteConversationStore:
