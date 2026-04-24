@@ -109,6 +109,55 @@ async def test_sqlite_store_persists_and_loads_context(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_in_memory_store_persona_crud() -> None:
+    store = InMemoryConversationStore()
+
+    assert await store.get_persona("cat") is None
+    assert await store.list_personas() == {}
+
+    await store.save_persona("cat", "你是一只猫")
+    await store.save_persona("dog", "你是一只狗")
+
+    assert await store.get_persona("cat") == "你是一只猫"
+    assert await store.list_personas() == {"cat": "你是一只猫", "dog": "你是一只狗"}
+
+    await store.delete_persona("cat")
+    assert await store.get_persona("cat") is None
+    assert "dog" in await store.list_personas()
+
+    await store.delete_persona("nonexistent")  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_sqlite_store_persona_crud(tmp_path: Path) -> None:
+    store = SQLiteConversationStore(tmp_path / "conversations.sqlite3")
+
+    assert await store.get_persona("cat") is None
+    assert await store.list_personas() == {}
+
+    await store.save_persona("cat", "你是一只猫")
+    await store.save_persona("dog", "你是一只狗")
+
+    assert await store.get_persona("cat") == "你是一只猫"
+    assert await store.list_personas() == {"cat": "你是一只猫", "dog": "你是一只狗"}
+
+    await store.save_persona("cat", "updated")
+    assert await store.get_persona("cat") == "updated"
+
+    await store.delete_persona("cat")
+    assert await store.get_persona("cat") is None
+    assert "dog" in await store.list_personas()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_store_close(tmp_path: Path) -> None:
+    store = SQLiteConversationStore(tmp_path / "conversations.sqlite3")
+    _ = await store.get_conversation("any-key")  # opens connection
+    await store.close()
+    assert store._conn is None
+
+
+@pytest.mark.asyncio
 async def test_sqlite_store_lists_and_deletes_conversations(tmp_path: Path) -> None:
     store = SQLiteConversationStore(tmp_path / "conversations.sqlite3")
     context = _conversation_context()
