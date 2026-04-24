@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Awaitable, Callable
 from typing import cast, override
 
@@ -204,7 +205,6 @@ class GeminiChatProvider(ChatProvider):
                 tool_calls = message.metadata.get("tool_calls")
                 if isinstance(tool_calls, list):
                     for tc in tool_calls:
-                        import json
                         args = tc.get("function", {}).get("arguments")
                         if isinstance(args, str):
                             try:

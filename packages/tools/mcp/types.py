@@ -13,6 +13,7 @@ class MCPServerConfig:
 
     # stdio only
     command: list[str] | None = None
+    args: list[str] | None = None
     env: dict[str, str] | None = None
     cwd: str | None = None
 
