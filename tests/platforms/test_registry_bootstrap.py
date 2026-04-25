@@ -4,7 +4,7 @@ from typing import TypeAlias, cast
 
 from packages.app import NekoBotFramework
 from packages.platforms.bootstrap import PlatformBootstrap
-from packages.platforms.registry import PlatformRegistry
+from packages.platforms.registry import PlatformRegistry  # still used in test_platform_registry_registers_and_lists_types
 
 ValueMap: TypeAlias = dict[str, object]
 
@@ -40,13 +40,12 @@ def test_platform_registry_registers_and_lists_types() -> None:
 
 async def test_platform_bootstrap_starts_enabled_instances() -> None:
     framework = NekoBotFramework()
-    registry = PlatformRegistry()
-    registry.register(
+    framework.platform_registry.register(
         platform_type="fake",
         module_path="tests.platforms.test_registry_bootstrap",
         factory_name="create_fake_adapter",
     )
-    bootstrap = PlatformBootstrap(framework, registry=registry)
+    bootstrap = PlatformBootstrap(framework)
 
     instances = await bootstrap.start_platforms(
         [
@@ -63,13 +62,12 @@ async def test_platform_bootstrap_starts_enabled_instances() -> None:
 
 async def test_platform_bootstrap_stops_running_instances() -> None:
     framework = NekoBotFramework()
-    registry = PlatformRegistry()
-    registry.register(
+    framework.platform_registry.register(
         platform_type="fake",
         module_path="tests.platforms.test_registry_bootstrap",
         factory_name="create_fake_adapter",
     )
-    bootstrap = PlatformBootstrap(framework, registry=registry)
+    bootstrap = PlatformBootstrap(framework)
     instances = await bootstrap.start_platforms(
         [{"type": "fake", "instance_uuid": "instance-a", "enabled": True}]
     )

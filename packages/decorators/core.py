@@ -11,6 +11,7 @@ from ..contracts import (
     CommandSpec,
     EventHandlerSpec,
     PermissionSpec,
+    PlatformSpec,
     PluginSpec,
     ProviderSpec,
     SchemaRef,
@@ -138,6 +139,7 @@ PROVIDER_SPEC_ATTR = "__nekobot_provider_spec__"
 PERMISSION_SPEC_ATTR = "__nekobot_permission_spec__"
 CONFIG_SCHEMA_ATTR = "__nekobot_config_schema__"
 AGENT_TOOL_SPEC_ATTR = "__nekobot_agent_tool_spec__"
+PLATFORM_SPEC_ATTR = "__nekobot_platform_spec__"
 
 
 def plugin(
@@ -292,6 +294,40 @@ def requires_permissions(
 def config_schema(schema_name: str) -> Callable[[T], T]:
     def decorator(target: T) -> T:
         setattr(target, CONFIG_SCHEMA_ATTR, SchemaRef(schema_name))
+        return target
+
+    return decorator
+
+
+def platform(
+    *,
+    platform_type: str,
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> Callable[[type[T]], type[T]]:
+    """将一个适配器类注册为可用的平台类型。
+
+    被装饰的类必须实现 ``async start()`` 和 ``async stop()``，
+    构造函数签名为 ``__init__(self, config, *, framework, configuration, **kwargs)``。
+
+    注册后，用户可在 ``config.json`` 的 ``platforms`` 列表中使用该 platform_type 名称::
+
+        @platform(platform_type="my_platform", description="自定义平台适配器")
+        class MyPlatformAdapter:
+            def __init__(self, config, *, framework, configuration, **kwargs): ...
+            async def start(self) -> None: ...
+            async def stop(self) -> None: ...
+    """
+    def decorator(target: type[T]) -> type[T]:
+        setattr(
+            target,
+            PLATFORM_SPEC_ATTR,
+            PlatformSpec(
+                platform_type=platform_type,
+                description=description,
+                metadata=metadata or {},
+            ),
+        )
         return target
 
     return decorator

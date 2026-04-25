@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import yaml
 from loguru import logger
 
-from ..decorators.core import PLUGIN_SPEC_ATTR
+from ..decorators.core import PLATFORM_SPEC_ATTR, PLUGIN_SPEC_ATTR
 
 if TYPE_CHECKING:
     from ..app import NekoBotFramework
@@ -126,6 +126,8 @@ class PluginReloader:
         self.framework = framework
         # plugin_name → module dotted path
         self._source: dict[str, str] = {}
+        # module_path → list of platform_types registered from that module
+        self._platform_types: dict[str, list[str]] = {}
         # dir_name → PluginMetadata
         self._metadata: dict[str, PluginMetadata] = {}
         self._watch_task: asyncio.Task[None] | None = None
@@ -268,7 +270,26 @@ class PluginReloader:
 
     def _bind_module(self, module: ModuleType, module_path: str) -> list[str]:
         loaded: list[str] = []
+        registered_types: list[str] = []
         for _, member in inspect.getmembers(module, inspect.isclass):
+            # @platform 装饰器：注册平台类型（允许重注册，支持热重载）
+            platform_spec = getattr(member, PLATFORM_SPEC_ATTR, None)
+            if platform_spec is not None:
+                try:
+                    self.framework.platform_registry.register_class(
+                        platform_spec.platform_type, member
+                    )
+                    registered_types.append(platform_spec.platform_type)
+                    logger.info(
+                        "PluginReloader: registered platform type {!r} from {}",
+                        platform_spec.platform_type,
+                        module_path,
+                    )
+                except Exception as exc:
+                    logger.warning("PluginReloader: platform register failed: {}", exc)
+                continue
+
+            # @plugin 装饰器：注册插件
             if getattr(member, PLUGIN_SPEC_ATTR, None) is None:
                 continue
             try:
@@ -285,14 +306,24 @@ class PluginReloader:
                 registered.spec.version,
                 module_path,
             )
+        self._platform_types[module_path] = registered_types
         return loaded
 
     def _unregister_from_module(self, module_path: str) -> list[str]:
         names = [n for n, mp in self._source.items() if mp == module_path]
         for name in names:
-            self.framework.runtime_registry.unregister_plugin(name)  # 级联更新 command/event 注册表
-            self.framework.tool_registry.unregister_plugin(name)
-            del self._source[name]
+            try:
+                self.framework.runtime_registry.unregister_plugin(name)
+            except Exception as exc:
+                logger.warning("PluginReloader: runtime unregister failed for {!r}: {}", name, exc)
+            try:
+                self.framework.tool_registry.unregister_plugin(name)
+            except Exception as exc:
+                logger.warning("PluginReloader: tool unregister failed for {!r}: {}", name, exc)
+            self._source.pop(name, None)
+        # 清理该模块注册的平台类型
+        for platform_type in self._platform_types.pop(module_path, []):
+            self.framework.platform_registry.unregister(platform_type)
             logger.info("PluginReloader: unloaded {!r}", name)
         return names
 

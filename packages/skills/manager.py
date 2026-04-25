@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -29,21 +28,33 @@ class SkillManager:
         self._skills: dict[str, SkillInfo] = {}
 
     async def load_all(self, directory: Optional[str] = None) -> None:
-        """Recursively search and load skills from the directory."""
+        """Load skills from the directory (two levels deep, no full tree walk).
+
+        Scans:
+          - <dir>/*.md            (top-level Markdown files)
+          - <dir>/<subdir>/skill.md  (one subdir level only)
+        """
         search_dir = Path(directory) if directory else self.data_dir
         if not search_dir.exists():
             search_dir.mkdir(parents=True, exist_ok=True)
             return
 
-        logger.info("SkillManager: searching for skills in {}", search_dir)
+        logger.info("SkillManager: loading skills from {}", search_dir)
         self._skills.clear()
 
-        # 遍历 data/skills/**/SKILL.md 或 skill.md
-        for root, _, files in os.walk(search_dir):
-            for file in files:
-                if file.lower() in ("skill.md", "skills.md"):
-                    full_path = Path(root) / file
-                    await self._load_skill_file(full_path)
+        candidates: list[Path] = []
+        for entry in search_dir.iterdir():
+            if entry.is_file() and entry.suffix.lower() == ".md":
+                candidates.append(entry)
+            elif entry.is_dir():
+                skill_file = entry / "skill.md"
+                if not skill_file.exists():
+                    skill_file = entry / "SKILL.md"
+                if skill_file.exists():
+                    candidates.append(skill_file)
+
+        for path in candidates:
+            await self._load_skill_file(path)
 
         logger.info("SkillManager: loaded {} skill(s)", len(self._skills))
 

@@ -151,25 +151,31 @@ class BaseDispatcher(ABC):
             cmd_entry = self.framework.command_registry.resolve(cmd_name)
             if cmd_entry is not None and cmd_entry.plugin_name in enabled:
                 plugin_name = cmd_entry.plugin_name
-                ctx = await _build_ctx(plugin_name)
-                plugin = _instantiate(plugin_name, ctx)
-                handler = getattr(plugin, cmd_entry.handler_name, None)
-                if callable(handler):
-                    cmd_payload = dict(payload)
-                    cmd_payload["command_name"] = cmd_name
-                    cmd_payload["command_args"] = cmd_args
-                    logger.info(
-                        "[{}] 命令分发: {} -> {} (cmd={})",
-                        event.platform,
-                        plugin_name,
-                        cmd_entry.handler_name,
-                        cmd_name,
+                try:
+                    ctx = await _build_ctx(plugin_name)
+                    plugin = _instantiate(plugin_name, ctx)
+                    handler = getattr(plugin, cmd_entry.handler_name, None)
+                    if callable(handler):
+                        cmd_payload = dict(payload)
+                        cmd_payload["command_name"] = cmd_name
+                        cmd_payload["command_args"] = cmd_args
+                        logger.info(
+                            "[{}] 命令分发: {} -> {} (cmd={})",
+                            event.platform,
+                            plugin_name,
+                            cmd_entry.handler_name,
+                            cmd_name,
+                        )
+                        await cast(
+                            Callable[[dict[str, object]], Awaitable[None]], handler
+                        )(cmd_payload)
+                    handled_plugins.add(plugin_name)
+                    command_handled = True
+                except Exception as exc:
+                    logger.error(
+                        "[{}] 插件 {!r} 命令处理异常 (cmd={}): {}",
+                        event.platform, plugin_name, cmd_name, exc,
                     )
-                    await cast(
-                        Callable[[dict[str, object]], Awaitable[None]], handler
-                    )(cmd_payload)
-                handled_plugins.add(plugin_name)
-                command_handled = True
 
         if not command_handled:
             # --- Event handler routing ---
@@ -180,44 +186,59 @@ class BaseDispatcher(ABC):
                     by_plugin.setdefault(ev_entry.plugin_name, []).append(ev_entry)
 
             for plugin_name, entries in by_plugin.items():
-                ctx = await _build_ctx(plugin_name)
-                plugin = _instantiate(plugin_name, ctx)
-                for ev_entry in entries:
-                    handler = getattr(plugin, ev_entry.handler_name, None)
-                    if callable(handler):
-                        logger.info(
-                            "[{}] 分发至插件: {} -> {} (event={})",
-                            event.platform,
-                            plugin_name,
-                            ev_entry.handler_name,
-                            event.event_name,
-                        )
-                        await cast(
-                            Callable[[dict[str, object]], Awaitable[None]], handler
-                        )(payload)
-                await plugin.on_event(event.event_name, payload)
+                try:
+                    ctx = await _build_ctx(plugin_name)
+                    plugin = _instantiate(plugin_name, ctx)
+                    for ev_entry in entries:
+                        handler = getattr(plugin, ev_entry.handler_name, None)
+                        if callable(handler):
+                            logger.info(
+                                "[{}] 分发至插件: {} -> {} (event={})",
+                                event.platform,
+                                plugin_name,
+                                ev_entry.handler_name,
+                                event.event_name,
+                            )
+                            await cast(
+                                Callable[[dict[str, object]], Awaitable[None]], handler
+                            )(payload)
+                    await plugin.on_event(event.event_name, payload)
+                except Exception as exc:
+                    logger.error(
+                        "[{}] 插件 {!r} 事件处理异常 (event={}): {}",
+                        event.platform, plugin_name, event.event_name, exc,
+                    )
                 handled_plugins.add(plugin_name)
 
             # --- on_event fallback for remaining enabled plugins ---
             for plugin_name in enabled:
                 if plugin_name in handled_plugins:
                     continue
-                ctx = await _build_ctx(plugin_name)
-                plugin = _instantiate(plugin_name, ctx)
-                await plugin.on_event(event.event_name, payload)
+                try:
+                    ctx = await _build_ctx(plugin_name)
+                    plugin = _instantiate(plugin_name, ctx)
+                    await plugin.on_event(event.event_name, payload)
+                except Exception as exc:
+                    logger.error(
+                        "[{}] 插件 {!r} on_event 异常: {}",
+                        event.platform, plugin_name, exc,
+                    )
 
         # --- LLM fallback (message events only) ---
         if self.llm_handler is not None and event.event_type == EventType.MESSAGE:
-            extra = await self._get_llm_extra_payload(event, execution, cfg)
-            llm_payload = {**payload, **extra}
-            await self.llm_handler.handle(
-                payload=llm_payload,
-                execution=execution,
-                configuration=cfg,
-                conversation=conversation,
-                reply=reply_callable,
-                recall=recall_callable,
-            )
+            try:
+                extra = await self._get_llm_extra_payload(event, execution, cfg)
+                llm_payload = {**payload, **extra}
+                await self.llm_handler.handle(
+                    payload=llm_payload,
+                    execution=execution,
+                    configuration=cfg,
+                    conversation=conversation,
+                    reply=reply_callable,
+                    recall=recall_callable,
+                )
+            except Exception as exc:
+                logger.error("[{}] LLM handler 异常: {}", event.platform, exc)
 
         return contexts
 

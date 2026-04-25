@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from loguru import logger
 
@@ -30,6 +31,7 @@ from ..providers.sources import (
 )
 from ..tools.mcp.types import MCPServerConfig
 from .config import BootstrapConfig, normalize_app_config
+from .manager import ConfigManager
 
 
 @dataclass(slots=True)
@@ -39,8 +41,48 @@ class BootstrappedRuntime:
     platform_bootstrap: PlatformBootstrap
     running_platforms: tuple[RunningPlatformInstance, ...]
     plugin_reloader: PluginReloader | None = None
+    _config_watch_task: "asyncio.Task[None] | None" = field(default=None, repr=False)
+
+    async def reload_config(self, config_path: str = "data/config.json") -> None:
+        """从磁盘重新读取配置并触发热重载 observer 链。"""
+        from pathlib import Path
+
+        from .config import load_app_config
+        try:
+            new_config = load_app_config(Path(config_path))
+            await self.framework.update_framework_config(new_config)
+        except Exception as exc:
+            logger.error("Config reload failed: {}", exc)
+
+    async def watch_config(self, config_path: str = "data/config.json") -> None:
+        """用 watchfiles 监听配置文件，保存即触发热重载。"""
+        try:
+            from watchfiles import awatch
+        except ImportError:
+            logger.warning("watchfiles 未安装，跳过配置文件监听")
+            return
+
+        from pathlib import Path
+        path = Path(config_path)
+
+        async def _loop() -> None:
+            logger.info("Config watcher started: {}", path)
+            try:
+                async for _ in awatch(path):
+                    logger.info("Config file changed, reloading...")
+                    await self.reload_config(config_path)
+            except asyncio.CancelledError:
+                pass
+
+        self._config_watch_task = asyncio.create_task(_loop())
+
+    def stop_config_watch(self) -> None:
+        if self._config_watch_task and not self._config_watch_task.done():
+            self._config_watch_task.cancel()
+            self._config_watch_task = None
 
     async def stop(self) -> None:
+        self.stop_config_watch()
         if self.plugin_reloader is not None:
             self.plugin_reloader.stop_watch()
         logger.info("Stopping {} platform instance(s)...", len(self.running_platforms))
@@ -183,6 +225,54 @@ async def _bootstrap_skills(framework: NekoBotFramework, data_dir: str = "data/s
         logger.error("Failed to bootstrap skills: {}", exc)
 
 
+def _register_config_observer(runtime: BootstrappedRuntime) -> None:
+    """注册配置热重载 observer。
+
+    变更生效范围：
+      - 权限引擎（立即生效）
+      - ConfigurationContext（后续事件使用新配置）
+      - 各平台 adapter 的 configuration 引用
+      - Skills（重新扫描磁盘）
+    平台连接本身不重启（平台变更需要重启进程）。
+    """
+
+    async def _on_config_update(new_config: BootstrapConfig) -> None:
+        fw = runtime.framework
+
+        # 1. 重建权限引擎
+        _setup_permissions(fw, new_config.permission_config)
+
+        # 2. 重建 ConfigurationContext
+        new_cfg = fw.build_configuration_context(
+            framework_config=new_config.framework_config,
+            plugin_configs=new_config.plugin_configs,
+            provider_configs=new_config.provider_configs,
+            permission_config=new_config.permission_config,
+            moderation_config=new_config.moderation_config,
+            conversation_config=new_config.conversation_config,
+            plugin_bindings=new_config.plugin_bindings,
+        )
+        runtime.configuration = new_cfg
+
+        # 3. 同步更新各 platform adapter 的 configuration（就地替换引用）
+        for instance in runtime.running_platforms:
+            adapter = instance.adapter
+            if hasattr(adapter, "configuration"):
+                adapter.configuration = new_cfg  # type: ignore[union-attr]
+
+        # 4. 重载 Skills
+        await fw.reload_skills()
+
+        logger.info(
+            "Config hot-reloaded: permissions={} plugins={} providers={}",
+            len(new_config.permission_config),
+            len(new_config.plugin_configs),
+            len(new_config.provider_configs),
+        )
+
+    runtime.framework.add_config_observer(_on_config_update)
+
+
 async def bootstrap_runtime(
     app_config: BootstrapConfig | dict[object, object] | None = None,
     *,
@@ -192,6 +282,7 @@ async def bootstrap_runtime(
     watch_plugins: bool = True,
 ) -> BootstrappedRuntime:
     framework = framework or create_framework()
+    framework.config_manager = ConfigManager(framework)
     _register_builtin_providers(framework)
     if app_config is None:
         normalized = BootstrapConfig()
@@ -216,7 +307,24 @@ async def bootstrap_runtime(
         "Bootstrapping framework with {} configured platform instance(s)",
         len(normalized.platforms),
     )
-    platform_bootstrap = PlatformBootstrap(framework, registry=registry)
+    if registry is not None:
+        # 将外部传入的注册表合并到 framework.platform_registry
+        existing = set(framework.platform_registry.list_types())
+        for platform_type in registry.list_types():
+            if platform_type in existing:
+                continue
+            entry = registry.get_entry(platform_type)
+            if entry.adapter_class is not None:
+                framework.platform_registry.register_class(
+                    platform_type, entry.adapter_class
+                )
+            elif entry.module_path and entry.factory_name:
+                framework.platform_registry.register(
+                    platform_type=platform_type,
+                    module_path=entry.module_path,
+                    factory_name=entry.factory_name,
+                )
+    platform_bootstrap = PlatformBootstrap(framework)
     running_platforms = await platform_bootstrap.start_platforms(
         normalized.platforms,
         configuration=configuration,
@@ -242,10 +350,12 @@ async def bootstrap_runtime(
     else:
         logger.debug("Plugin directory not found, skipping: {}", plugin_dir)
 
-    return BootstrappedRuntime(
+    runtime = BootstrappedRuntime(
         framework=framework,
         configuration=configuration,
         platform_bootstrap=platform_bootstrap,
         running_platforms=running_platforms,
         plugin_reloader=reloader,
     )
+    _register_config_observer(runtime)
+    return runtime
