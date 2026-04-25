@@ -169,13 +169,13 @@ class BaseDispatcher(ABC):
                         await cast(
                             Callable[[dict[str, object]], Awaitable[None]], handler
                         )(cmd_payload)
+                    handled_plugins.add(plugin_name)
+                    command_handled = True
                 except Exception as exc:
                     logger.error(
                         "[{}] 插件 {!r} 命令处理异常 (cmd={}): {}",
                         event.platform, plugin_name, cmd_name, exc,
                     )
-                handled_plugins.add(plugin_name)
-                command_handled = True
 
         if not command_handled:
             # --- Event handler routing ---

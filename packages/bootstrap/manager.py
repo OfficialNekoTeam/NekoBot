@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import json
 import uuid
@@ -193,6 +194,8 @@ class ConfigManager:
         self._entries: dict[str, ConfigEntry] = {}
         self._configs: dict[str, BootstrapConfig] = {}
         self.router: ConfigRouter = ConfigRouter(routing_path)
+        # per-config write lock — prevents concurrent read-modify-write races
+        self._locks: dict[str, asyncio.Lock] = {}
 
         self._load_all()
 
@@ -209,8 +212,9 @@ class ConfigManager:
             return
         try:
             index = json.loads(index_path.read_text(encoding="utf-8"))
+            known = ConfigEntry.__dataclass_fields__
             for item in index:
-                entry = ConfigEntry(**item)
+                entry = ConfigEntry(**{k: v for k, v in item.items() if k in known})
                 cfg_path = self._configs_dir / entry.path
                 if cfg_path.exists():
                     self._entries[entry.id] = entry
@@ -225,10 +229,13 @@ class ConfigManager:
             asdict(e) for e in self._entries.values() if e.id != "default"
         ]
         index_path = self._configs_dir / "index.json"
-        index_path.write_text(
-            json.dumps(index, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        try:
+            index_path.write_text(
+                json.dumps(index, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            logger.error("ConfigManager: failed to persist config index: {}", exc)
 
     # ------------------------------------------------------------------
     # Hot-reload
@@ -338,22 +345,24 @@ class ConfigManager:
     async def _patch_section(self, config_id: str, section: str, value: object) -> None:
         if config_id not in self._entries:
             raise KeyError(f"Config {config_id!r} not found")
-        try:
-            raw = self._get_raw(config_id)
-            raw[section] = value
-            path = (
-                self._default_path
-                if config_id == "default"
-                else self._configs_dir / self._entries[config_id].path
-            )
-            save_app_config_raw(raw, path)
-        except Exception as exc:
-            logger.error(
-                "ConfigManager: failed to write config {!r} section {!r}: {}",
-                config_id, section, exc,
-            )
-            raise
-        await self._apply(config_id)
+        lock = self._locks.setdefault(config_id, asyncio.Lock())
+        async with lock:
+            try:
+                raw = self._get_raw(config_id)
+                raw[section] = value
+                path = (
+                    self._default_path
+                    if config_id == "default"
+                    else self._configs_dir / self._entries[config_id].path
+                )
+                save_app_config_raw(raw, path)
+            except Exception as exc:
+                logger.error(
+                    "ConfigManager: failed to write config {!r} section {!r}: {}",
+                    config_id, section, exc,
+                )
+                raise
+            await self._apply(config_id)
 
     # ------------------------------------------------------------------
     # Top-level section setters

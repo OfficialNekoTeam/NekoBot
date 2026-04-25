@@ -301,7 +301,7 @@ def config_schema(schema_name: str) -> Callable[[T], T]:
 
 def platform(
     *,
-    type: str,
+    platform_type: str,
     description: str = "",
     metadata: dict[str, Any] | None = None,
 ) -> Callable[[type[T]], type[T]]:
@@ -310,9 +310,9 @@ def platform(
     被装饰的类必须实现 ``async start()`` 和 ``async stop()``，
     构造函数签名为 ``__init__(self, config, *, framework, configuration, **kwargs)``。
 
-    注册后，用户可在 ``config.json`` 的 ``platforms`` 列表中使用该 type 名称::
+    注册后，用户可在 ``config.json`` 的 ``platforms`` 列表中使用该 platform_type 名称::
 
-        @platform(type="my_platform", description="自定义平台适配器")
+        @platform(platform_type="my_platform", description="自定义平台适配器")
         class MyPlatformAdapter:
             def __init__(self, config, *, framework, configuration, **kwargs): ...
             async def start(self) -> None: ...
@@ -323,7 +323,7 @@ def platform(
             target,
             PLATFORM_SPEC_ATTR,
             PlatformSpec(
-                platform_type=type,
+                platform_type=platform_type,
                 description=description,
                 metadata=metadata or {},
             ),

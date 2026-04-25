@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from quart import Blueprint, current_app, request
 
 from ...knowledge.store import KnowledgeStore
@@ -30,7 +32,7 @@ async def list_kbs():
     if store is None:
         return _NOT_AVAILABLE
     kbs = await store.list_kbs()
-    return {"success": True, "data": [kb.__dict__ for kb in kbs]}
+    return {"success": True, "data": [asdict(kb) for kb in kbs]}
 
 
 @knowledge_bp.route("/", methods=["POST"])
@@ -47,7 +49,7 @@ async def create_kb():
         description=str(body.get("description", "")),
         embedding_model=str(body.get("embedding_model", "text-embedding-3-small")),
     )
-    return {"success": True, "data": kb.__dict__}, 201
+    return {"success": True, "data": asdict(kb)}, 201
 
 
 @knowledge_bp.route("/<kb_id>", methods=["GET"])
@@ -58,7 +60,7 @@ async def get_kb(kb_id: str):
     kb = await store.get_kb(kb_id)
     if kb is None:
         return {"success": False, "message": f"Knowledge base {kb_id!r} not found."}, 404
-    return {"success": True, "data": kb.__dict__}
+    return {"success": True, "data": asdict(kb)}
 
 
 @knowledge_bp.route("/<kb_id>", methods=["DELETE"])
@@ -83,7 +85,7 @@ async def list_documents(kb_id: str):
     if store is None:
         return _NOT_AVAILABLE
     docs = await store.list_documents(kb_id)
-    return {"success": True, "data": [d.__dict__ for d in docs]}
+    return {"success": True, "data": [asdict(d) for d in docs]}
 
 
 @knowledge_bp.route("/<kb_id>/documents", methods=["POST"])
@@ -95,9 +97,9 @@ async def upload_document(kb_id: str):
     f = files.get("file")
     if f is None:
         return {"success": False, "message": "No file provided."}, 400
-    content = f.read()
+    content = await f.read()
     doc = await store.add_document(kb_id, f.filename or "upload", content)
-    return {"success": True, "data": doc.__dict__}, 201
+    return {"success": True, "data": asdict(doc)}, 201
 
 
 @knowledge_bp.route("/<kb_id>/documents/<doc_id>", methods=["DELETE"])
@@ -130,7 +132,7 @@ async def search(kb_id: str):
         top_k=int(body.get("top_k", 5)),
         score_threshold=float(body.get("score_threshold", 0.0)),
     )
-    return {"success": True, "data": [r.__dict__ for r in results]}
+    return {"success": True, "data": [asdict(r) for r in results]}
 
 
 @knowledge_bp.route("/search", methods=["POST"])
@@ -149,4 +151,4 @@ async def search_multi():
         query=str(body.get("query", "")),
         top_k=int(body.get("top_k", 5)),
     )
-    return {"success": True, "data": [r.__dict__ for r in results]}
+    return {"success": True, "data": [asdict(r) for r in results]}

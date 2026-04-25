@@ -41,13 +41,18 @@ class PlatformRegistry:
         )
 
     def register_class(self, platform_type: str, adapter_class: type) -> None:
-        """直接注册适配器类（用于 @platform 装饰器）。"""
-        if platform_type in self._entries:
-            raise ValueError(f"platform type already registered: {platform_type}")
+        """直接注册适配器类（用于 @platform 装饰器），允许重注册（热重载场景）。"""
         self._entries[platform_type] = PlatformRegistryEntry(
             platform_type=platform_type,
             adapter_class=adapter_class,
         )
+
+    def unregister(self, platform_type: str) -> bool:
+        """移除平台类型注册，供插件卸载时调用。"""
+        if platform_type in self._entries:
+            del self._entries[platform_type]
+            return True
+        return False
 
     def get_entry(self, platform_type: str) -> PlatformRegistryEntry:
         try:
@@ -64,8 +69,13 @@ class PlatformRegistry:
         entry = self.get_entry(platform_type)
         if entry.adapter_class is not None:
             return entry.adapter_class(config, **kwargs)
-        module = import_module(entry.module_path or "")
-        factory = cast(PlatformFactory, getattr(module, entry.factory_name or ""))
+        if not entry.module_path or not entry.factory_name:
+            raise ValueError(
+                f"Platform entry {platform_type!r} has no adapter_class and no "
+                "module_path/factory_name — cannot instantiate"
+            )
+        module = import_module(entry.module_path)
+        factory = cast(PlatformFactory, getattr(module, entry.factory_name))
         return factory(config, **kwargs)
 
     def list_types(self) -> tuple[str, ...]:
