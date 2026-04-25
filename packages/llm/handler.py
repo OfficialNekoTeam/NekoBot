@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -23,6 +22,7 @@ from ._types import (
     _Ctx,
     _noop_recall,
 )
+from ..utils.conv_lock import ConversationLockManager
 from ._wake import _WakeMixin
 
 if TYPE_CHECKING:
@@ -45,14 +45,7 @@ class LLMHandler(
 
     def __init__(self, framework: NekoBotFramework) -> None:
         self.framework = framework
-        # Per-conversation serialization: same key → sequential, different keys → parallel.
-        # Locks are created lazily and retained for the lifetime of the handler.
-        self._conv_locks: dict[str, asyncio.Lock] = {}
-
-    def _get_conv_lock(self, key: str) -> asyncio.Lock:
-        if key not in self._conv_locks:
-            self._conv_locks[key] = asyncio.Lock()
-        return self._conv_locks[key]
+        self._conv_locks = ConversationLockManager()
 
     async def handle(
         self,
@@ -75,8 +68,7 @@ class LLMHandler(
             config=config,
         )
         conv_key = str(conversation.conversation_key) if conversation.conversation_key else ""
-        lock = self._get_conv_lock(conv_key)
-        async with lock:
+        async with self._conv_locks.acquire(conv_key):
             await self._handle_message(ctx)
 
     # ------------------------------------------------------------------
