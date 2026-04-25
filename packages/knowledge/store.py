@@ -61,6 +61,14 @@ class KnowledgeStore(ABC):
     ) -> KnowledgeBase: ...
 
     @abstractmethod
+    async def update_kb(
+        self,
+        kb_id: str,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> KnowledgeBase | None: ...
+
+    @abstractmethod
     async def delete_kb(self, kb_id: str) -> bool: ...
 
     @abstractmethod

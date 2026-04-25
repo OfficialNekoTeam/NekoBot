@@ -72,7 +72,7 @@ def create_app(framework: NekoBotFramework) -> Quart:
     # 动态注册路由组
     _discover_and_register_routes(app, routes)
 
-    @app.route("/api/ping", methods=["GET"])
+    @app.route("/api/v1/ping", methods=["GET"])
     async def ping() -> dict[str, object]:
         return {"success": True, "message": "pong", "version": "0.1.0"}
 
