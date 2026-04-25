@@ -4,6 +4,7 @@ import asyncio
 import fnmatch
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -342,7 +343,15 @@ class ConfigManager:
         )
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def _config_path(self, config_id: str) -> Path:
+        return (
+            self._default_path
+            if config_id == "default"
+            else self._configs_dir / self._entries[config_id].path
+        )
+
     async def _patch_section(self, config_id: str, section: str, value: object) -> None:
+        """Lock-safe full-section overwrite."""
         if config_id not in self._entries:
             raise KeyError(f"Config {config_id!r} not found")
         lock = self._locks.setdefault(config_id, asyncio.Lock())
@@ -350,15 +359,30 @@ class ConfigManager:
             try:
                 raw = self._get_raw(config_id)
                 raw[section] = value
-                path = (
-                    self._default_path
-                    if config_id == "default"
-                    else self._configs_dir / self._entries[config_id].path
-                )
-                save_app_config_raw(raw, path)
+                save_app_config_raw(raw, self._config_path(config_id))
             except Exception as exc:
                 logger.error(
                     "ConfigManager: failed to write config {!r} section {!r}: {}",
+                    config_id, section, exc,
+                )
+                raise
+            await self._apply(config_id)
+
+    async def _mutate_section(
+        self, config_id: str, section: str, fn: Callable[[object], object]
+    ) -> None:
+        """Lock-safe read-modify-write: fn receives current section value, returns new value."""
+        if config_id not in self._entries:
+            raise KeyError(f"Config {config_id!r} not found")
+        lock = self._locks.setdefault(config_id, asyncio.Lock())
+        async with lock:
+            try:
+                raw = self._get_raw(config_id)
+                raw[section] = fn(raw.get(section))
+                save_app_config_raw(raw, self._config_path(config_id))
+            except Exception as exc:
+                logger.error(
+                    "ConfigManager: failed to mutate config {!r} section {!r}: {}",
                     config_id, section, exc,
                 )
                 raise
@@ -399,19 +423,24 @@ class ConfigManager:
     async def set_provider(
         self, name: str, cfg: dict, config_id: str = "default"
     ) -> None:
-        raw = self._get_raw(config_id)
-        providers = raw.get("provider_configs", {})
-        providers[name] = cfg
-        await self._patch_section(config_id, "provider_configs", providers)
+        def _set(current: object) -> object:
+            providers = dict(current) if isinstance(current, dict) else {}
+            providers[name] = cfg
+            return providers
+        await self._mutate_section(config_id, "provider_configs", _set)
 
     async def delete_provider(self, name: str, config_id: str = "default") -> bool:
-        raw = self._get_raw(config_id)
-        providers = raw.get("provider_configs", {})
-        if name not in providers:
-            return False
-        del providers[name]
-        await self._patch_section(config_id, "provider_configs", providers)
-        return True
+        found = False
+
+        def _delete(current: object) -> object:
+            nonlocal found
+            providers = dict(current) if isinstance(current, dict) else {}
+            found = name in providers
+            providers.pop(name, None)
+            return providers
+
+        await self._mutate_section(config_id, "provider_configs", _delete)
+        return found
 
     # ------------------------------------------------------------------
     # Plugin config CRUD
@@ -424,10 +453,11 @@ class ConfigManager:
     async def set_plugin_config(
         self, plugin_name: str, cfg: dict, config_id: str = "default"
     ) -> None:
-        raw = self._get_raw(config_id)
-        plugin_configs = raw.get("plugin_configs", {})
-        plugin_configs[plugin_name] = cfg
-        await self._patch_section(config_id, "plugin_configs", plugin_configs)
+        def _set(current: object) -> object:
+            plugin_configs = dict(current) if isinstance(current, dict) else {}
+            plugin_configs[plugin_name] = cfg
+            return plugin_configs
+        await self._mutate_section(config_id, "plugin_configs", _set)
 
     # ------------------------------------------------------------------
     # Plugin binding CRUD
@@ -440,10 +470,11 @@ class ConfigManager:
     async def set_plugin_binding(
         self, plugin_name: str, binding: dict, config_id: str = "default"
     ) -> None:
-        raw = self._get_raw(config_id)
-        bindings = raw.get("plugin_bindings", {})
-        bindings[plugin_name] = binding
-        await self._patch_section(config_id, "plugin_bindings", bindings)
+        def _set(current: object) -> object:
+            bindings = dict(current) if isinstance(current, dict) else {}
+            bindings[plugin_name] = binding
+            return bindings
+        await self._mutate_section(config_id, "plugin_bindings", _set)
 
     # ------------------------------------------------------------------
     # Platform CRUD
@@ -456,23 +487,27 @@ class ConfigManager:
     async def upsert_platform(
         self, instance_uuid: str, cfg: dict, config_id: str = "default"
     ) -> None:
-        raw = self._get_raw(config_id)
-        platforms: list[dict] = raw.get("platforms", [])
-        for i, p in enumerate(platforms):
-            if p.get("instance_uuid") == instance_uuid:
-                platforms[i] = cfg
-                break
-        else:
+        def _upsert(current: object) -> object:
+            platforms: list[dict] = list(current) if isinstance(current, list) else []
+            for i, p in enumerate(platforms):
+                if p.get("instance_uuid") == instance_uuid:
+                    platforms[i] = cfg
+                    return platforms
             platforms.append(cfg)
-        await self._patch_section(config_id, "platforms", platforms)
+            return platforms
+        await self._mutate_section(config_id, "platforms", _upsert)
 
     async def delete_platform(
         self, instance_uuid: str, config_id: str = "default"
     ) -> bool:
-        raw = self._get_raw(config_id)
-        platforms: list[dict] = raw.get("platforms", [])
-        new_platforms = [p for p in platforms if p.get("instance_uuid") != instance_uuid]
-        if len(new_platforms) == len(platforms):
-            return False
-        await self._patch_section(config_id, "platforms", new_platforms)
-        return True
+        found = False
+
+        def _delete(current: object) -> object:
+            nonlocal found
+            platforms: list[dict] = list(current) if isinstance(current, list) else []
+            new_platforms = [p for p in platforms if p.get("instance_uuid") != instance_uuid]
+            found = len(new_platforms) < len(platforms)
+            return new_platforms
+
+        await self._mutate_section(config_id, "platforms", _delete)
+        return found

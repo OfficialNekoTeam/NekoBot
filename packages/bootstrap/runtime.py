@@ -310,16 +310,17 @@ async def bootstrap_runtime(
     if registry is not None:
         # 将外部传入的注册表合并到 framework.platform_registry
         existing = set(framework.platform_registry.list_types())
-        for entry in registry._entries.values():
-            if entry.platform_type in existing:
+        for platform_type in registry.list_types():
+            if platform_type in existing:
                 continue
+            entry = registry.get_entry(platform_type)
             if entry.adapter_class is not None:
                 framework.platform_registry.register_class(
-                    entry.platform_type, entry.adapter_class
+                    platform_type, entry.adapter_class
                 )
             elif entry.module_path and entry.factory_name:
                 framework.platform_registry.register(
-                    platform_type=entry.platform_type,
+                    platform_type=platform_type,
                     module_path=entry.module_path,
                     factory_name=entry.factory_name,
                 )
