@@ -46,6 +46,7 @@ class EventHandlerSpec:
     description: str = ""
     payload_schema: SchemaRef | None = None
     permissions: PermissionSpec | None = None
+    priority: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

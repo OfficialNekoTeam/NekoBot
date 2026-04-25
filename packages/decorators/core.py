@@ -195,6 +195,7 @@ def event_handler(
     event: str,
     description: str = "",
     payload_schema: str | None = None,
+    priority: int = 0,
     metadata: dict[str, Any] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(target: Callable[..., Any]) -> Callable[..., Any]:
@@ -205,6 +206,7 @@ def event_handler(
                 event=event,
                 description=description,
                 payload_schema=SchemaRef(payload_schema) if payload_schema else None,
+                priority=priority,
                 metadata=metadata or {},
             ),
         )

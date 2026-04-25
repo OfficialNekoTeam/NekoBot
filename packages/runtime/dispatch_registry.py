@@ -109,13 +109,14 @@ class EventHandlerRegistry:
                 del self._index[event]
 
     def resolve(self, actual_event: str) -> list[EventHandlerEntry]:
-        """Return all entries whose registered event matches ``actual_event``."""
+        """Return matching entries sorted by priority descending (higher runs first)."""
         results: list[EventHandlerEntry] = []
         for registered_event, entries in self._index.items():
             if registered_event == actual_event or actual_event.startswith(
                 f"{registered_event}."
             ):
                 results.extend(entries)
+        results.sort(key=lambda e: e.spec.priority, reverse=True)
         return results
 
     def __len__(self) -> int:
