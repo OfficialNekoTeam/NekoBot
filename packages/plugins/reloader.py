@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import yaml
 from loguru import logger
 
-from ..decorators.core import PLUGIN_SPEC_ATTR
+from ..decorators.core import PLATFORM_SPEC_ATTR, PLUGIN_SPEC_ATTR
 
 if TYPE_CHECKING:
     from ..app import NekoBotFramework
@@ -269,6 +269,23 @@ class PluginReloader:
     def _bind_module(self, module: ModuleType, module_path: str) -> list[str]:
         loaded: list[str] = []
         for _, member in inspect.getmembers(module, inspect.isclass):
+            # @platform 装饰器：注册平台类型
+            platform_spec = getattr(member, PLATFORM_SPEC_ATTR, None)
+            if platform_spec is not None:
+                try:
+                    self.framework.platform_registry.register_class(
+                        platform_spec.platform_type, member
+                    )
+                    logger.info(
+                        "PluginReloader: registered platform type {!r} from {}",
+                        platform_spec.platform_type,
+                        module_path,
+                    )
+                except ValueError as exc:
+                    logger.warning("PluginReloader: platform register failed: {}", exc)
+                continue
+
+            # @plugin 装饰器：注册插件
             if getattr(member, PLUGIN_SPEC_ATTR, None) is None:
                 continue
             try:
@@ -290,9 +307,15 @@ class PluginReloader:
     def _unregister_from_module(self, module_path: str) -> list[str]:
         names = [n for n, mp in self._source.items() if mp == module_path]
         for name in names:
-            self.framework.runtime_registry.unregister_plugin(name)  # 级联更新 command/event 注册表
-            self.framework.tool_registry.unregister_plugin(name)
-            del self._source[name]
+            try:
+                self.framework.runtime_registry.unregister_plugin(name)
+            except Exception as exc:
+                logger.warning("PluginReloader: runtime unregister failed for {!r}: {}", name, exc)
+            try:
+                self.framework.tool_registry.unregister_plugin(name)
+            except Exception as exc:
+                logger.warning("PluginReloader: tool unregister failed for {!r}: {}", name, exc)
+            self._source.pop(name, None)
             logger.info("PluginReloader: unloaded {!r}", name)
         return names
 

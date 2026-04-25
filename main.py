@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import sys
 
 from loguru import logger
@@ -46,6 +47,22 @@ async def async_main(
     fw_cfg = runtime.configuration.framework_config
     final_host = host or fw_cfg.get("web_host") or "0.0.0.0"
     final_port = port or fw_cfg.get("web_port") or 6285
+
+    config_path = config_path or "data/config.json"
+
+    # SIGUSR1 → 重载配置 + Skills（不重启平台）
+    def _schedule_reload() -> None:
+        asyncio.create_task(runtime.reload_config(config_path))
+
+    try:
+        loop = asyncio.get_event_loop()
+        loop.add_signal_handler(signal.SIGUSR1, _schedule_reload)
+        logger.info("Signal handler registered: SIGUSR1 → config + skills reload")
+    except (NotImplementedError, AttributeError):
+        logger.debug("SIGUSR1 not supported on this platform, skipping")
+
+    # 监听配置文件变化（可选，watchfiles 已安装时生效）
+    await runtime.watch_config(config_path)
 
     web_task: asyncio.Task[None] | None = None
     if enable_webui:

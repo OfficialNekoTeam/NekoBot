@@ -106,6 +106,7 @@ async def test_sqlite_store_persists_and_loads_context(tmp_path: Path) -> None:
     assert loaded.history == context.history
     assert loaded.summary == "summary"
     assert loaded.metadata["tag"] == "demo"
+    await store.close()
 
 
 @pytest.mark.asyncio
@@ -147,6 +148,7 @@ async def test_sqlite_store_persona_crud(tmp_path: Path) -> None:
     await store.delete_persona("cat")
     assert await store.get_persona("cat") is None
     assert "dog" in await store.list_personas()
+    await store.close()
 
 
 @pytest.mark.asyncio
@@ -173,3 +175,4 @@ async def test_sqlite_store_lists_and_deletes_conversations(tmp_path: Path) -> N
 
     assert await store.list_conversation_keys() == ()
     assert await store.get_conversation(conversation_key.value) is None
+    await store.close()

@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from .bootstrap.config import BootstrapConfig
+    from .bootstrap.manager import ConfigManager
+    from .knowledge.store import KnowledgeStore
+    from .platforms.registry import PlatformRegistry
 
 from .conversations import (
     ConfigurationContext,
@@ -86,25 +89,41 @@ class NekoBotFramework:
         self.mcp_manager: MCPManager = MCPManager(self.tool_registry)
         # Skill 管理器 (指令化扩展)
         self.skill_manager: SkillManager = SkillManager(self)
+        # 平台类型注册表（内置类型由 bootstrap 注册，插件可通过 @platform 扩展）
+        from .platforms.registry import PlatformRegistry  # lazy import to break circular dependency
+        self.platform_registry: PlatformRegistry = PlatformRegistry()
         self._register_builtin_tools()
         self._config_observers: list[Callable[[BootstrapConfig], Awaitable[None]]] = []
+        # 多配置管理器，由 bootstrap 延迟注入
+        self.config_manager: ConfigManager | None = None
+        # 知识库插槽：由实现了 KnowledgeStore ABC 的插件在加载时注入
+        self.knowledge_store: KnowledgeStore | None = None
 
     def add_config_observer(self, observer: Callable[[BootstrapConfig], Awaitable[None]]) -> None:
         self._config_observers.append(observer)
 
-    async def update_framework_config(self, new_config: BootstrapConfig) -> None:
-        """原子更新全局配置并触发观察者。"""
-        from .bootstrap.config import save_app_config  # lazy: avoids app ↔ bootstrap circular import
-        save_app_config(new_config)
+    async def update_framework_config(
+        self, new_config: BootstrapConfig, *, save: bool = True
+    ) -> None:
+        """原子更新全局配置并触发观察者。
+
+        save=False 时跳过写盘（由调用方已完成持久化）。
+        """
+        if save:
+            from .bootstrap.config import save_app_config  # lazy: avoids app ↔ bootstrap circular import
+            save_app_config(new_config)
         for observer in self._config_observers:
             await observer(new_config)
 
     async def reload_mcp(self) -> None:
         """重新从 mcp_server.json 加载 MCP 服务器。"""
-        # 这里直接调用 bootstrap 中的逻辑
         from .bootstrap.runtime import _bootstrap_mcp
         await self.mcp_manager.stop_all()
         await _bootstrap_mcp(self)
+
+    async def reload_skills(self) -> None:
+        """重新从磁盘加载所有 Skills（不递归，仅扫两层）。"""
+        await self.skill_manager.load_all()
 
     def _register_builtin_tools(self) -> None:
         """注册框架内建工具。"""

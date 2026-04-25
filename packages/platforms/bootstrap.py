@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from loguru import logger
+
 from ..app import NekoBotFramework
 from ..conversations.context import ConfigurationContext
-from .registry import PlatformRegistry
 
 
 @dataclass(slots=True)
@@ -22,15 +23,14 @@ class StartablePlatform(Protocol):
 
 
 class PlatformBootstrap:
-    def __init__(
-        self,
-        framework: NekoBotFramework,
-        registry: PlatformRegistry | None = None,
-    ) -> None:
+    def __init__(self, framework: NekoBotFramework) -> None:
         self.framework: NekoBotFramework = framework
-        self.registry: PlatformRegistry = registry or PlatformRegistry()
         self._instances: dict[str, RunningPlatformInstance] = {}
         self._register_defaults()
+
+    @property
+    def registry(self):  # type: ignore[override]
+        return self.framework.platform_registry
 
     def _register_defaults(self) -> None:
         if "onebot_v11" not in self.registry.list_types():
@@ -53,19 +53,28 @@ class PlatformBootstrap:
             platform_type = config.get("type")
             instance_uuid = config.get("instance_uuid")
             if not isinstance(platform_type, str) or not isinstance(instance_uuid, str):
-                raise ValueError(
-                    "platform config requires string 'type' and 'instance_uuid'"
-                )
-            adapter = cast(
-                StartablePlatform,
-                self.registry.create(
-                    platform_type,
+                logger.error(
+                    "PlatformBootstrap: skipping platform config with missing 'type' or 'instance_uuid': {}",
                     config,
-                    framework=self.framework,
-                    configuration=configuration,
-                ),
-            )
-            await adapter.start()
+                )
+                continue
+            try:
+                adapter = cast(
+                    StartablePlatform,
+                    self.registry.create(
+                        platform_type,
+                        config,
+                        framework=self.framework,
+                        configuration=configuration,
+                    ),
+                )
+                await adapter.start()
+            except Exception as exc:
+                logger.error(
+                    "PlatformBootstrap: failed to start platform {!r} ({}): {}",
+                    instance_uuid, platform_type, exc,
+                )
+                continue
             running = RunningPlatformInstance(
                 platform_type=platform_type,
                 instance_uuid=instance_uuid,
@@ -79,7 +88,13 @@ class PlatformBootstrap:
         for instance_uuid in tuple(self._instances.keys()):
             running = self._instances.pop(instance_uuid)
             adapter = cast(StartablePlatform, running.adapter)
-            await adapter.stop()
+            try:
+                await adapter.stop()
+            except Exception as exc:
+                logger.error(
+                    "PlatformBootstrap: error stopping platform {!r}: {}",
+                    instance_uuid, exc,
+                )
 
     def list_instances(self) -> tuple[RunningPlatformInstance, ...]:
         return tuple(self._instances.values())

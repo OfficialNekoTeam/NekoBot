@@ -70,6 +70,13 @@ class AgentToolSpec:
 
 
 @dataclass(frozen=True)
+class PlatformSpec:
+    platform_type: str
+    description: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RegisteredPlugin:
     plugin_class: type[Any]
     spec: PluginSpec
