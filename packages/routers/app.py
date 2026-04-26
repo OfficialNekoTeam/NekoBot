@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import datetime
 import importlib
 import os
 import pkgutil
+from pathlib import Path
 
-from quart import Blueprint, Quart, Response, request
+from quart import Blueprint, Quart, Response, request, send_file
 
 from ..app import NekoBotFramework
 from . import routes
@@ -68,13 +70,49 @@ def create_app(framework: NekoBotFramework) -> Quart:
 
     # 注入框架实例
     app.config["FRAMEWORK"] = framework
+    app.config["START_TIME"] = datetime.datetime.now(datetime.timezone.utc)
 
     # 动态注册路由组
     _discover_and_register_routes(app, routes)
 
     @app.route("/api/v1/ping", methods=["GET"])
     async def ping() -> dict[str, object]:
-        return {"success": True, "message": "pong", "version": "0.1.0"}
+        try:
+            from importlib.metadata import version as _pkg_version
+            _version = _pkg_version("nekobot")
+        except Exception:
+            _version = "unknown"
+        return {"success": True, "message": "pong", "version": _version}
+
+    # 静态文件 + SPA fallback（仅当 dist 目录存在时生效）
+    # 优先取环境变量，否则相对于当前工作目录（通常是项目根目录）
+    _dist_raw = os.environ.get("NEKOBOT_DIST_DIR", "data/dist")
+    _dist = Path(_dist_raw) if os.path.isabs(_dist_raw) else (Path.cwd() / _dist_raw)
+    _dist = _dist.resolve()
+    from loguru import logger as _log
+    if not _dist.is_dir():
+        _log.warning("WebUI dist 目录不存在，静态文件服务已跳过: {}", _dist)
+    else:
+        _index = _dist / "index.html"
+        _log.info("Serving WebUI from: {}", _dist)
+
+        @app.route("/")
+        async def _root() -> Response:
+            return await send_file(_index)
+
+        @app.route("/<path:path>", methods=["GET"])
+        async def _static_or_spa(path: str) -> Response:
+            # API 路径不应到达此处，但防止意外匹配
+            if path.startswith("api/"):
+                return Response('{"success":false,"message":"Not found"}', status=404, content_type="application/json")
+            candidate = _dist / path
+            try:
+                candidate.relative_to(_dist)  # 防止路径穿越
+            except ValueError:
+                return await send_file(_index)
+            if candidate.is_file():
+                return await send_file(candidate)
+            return await send_file(_index)
 
     return app
 

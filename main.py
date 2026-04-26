@@ -36,17 +36,18 @@ async def async_main(
     config_path: str | None = None,
     *,
     run_forever: bool = True,
-    enable_webui: bool = True,
+    enable_webui: bool | None = None,
     host: str | None = None,
     port: int | None = None,
 ) -> BootstrappedRuntime:
     config = load_app_config(config_path)
     runtime = await bootstrap_runtime(config)
 
-    # 优先级：CLI/显式参数 > 配置项 > 默认值
+    # 优先级：CLI/env > 配置文件 framework_config.enable_webui > 默认值 True
     fw_cfg = runtime.configuration.framework_config
     final_host = host or fw_cfg.get("web_host") or "0.0.0.0"
     final_port = port or fw_cfg.get("web_port") or 6285
+    final_enable_webui = enable_webui if enable_webui is not None else bool(fw_cfg.get("enable_webui", True))
 
     config_path = config_path or "data/config.json"
 
@@ -65,7 +66,7 @@ async def async_main(
     await runtime.watch_config(config_path)
 
     web_task: asyncio.Task[None] | None = None
-    if enable_webui:
+    if final_enable_webui:
         from packages.routers import create_app
         web_app = create_app(runtime.framework)
         logger.info(f"启动 WebUI Dashboard 端点: http://{final_host}:{final_port}")
@@ -73,27 +74,54 @@ async def async_main(
     else:
         logger.info("WebUI 已禁用，跳过路由注册与端口监听。")
 
-    if run_forever and (runtime.running_platforms or enable_webui):
+    if run_forever and (runtime.running_platforms or final_enable_webui):
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        # web_task（Hypercorn）退出时也触发 stop（不管谁先关）
+        if web_task is not None:
+            def _on_web_done(task: asyncio.Task[None]) -> None:
+                if not task.cancelled() and (exc := task.exception()) is not None:
+                    logger.error("WebUI server stopped unexpectedly: {}", exc)
+                stop_event.set()
+            web_task.add_done_callback(_on_web_done)
+
+        # 覆盖 Hypercorn 可能装的 SIGINT/SIGTERM handler
+        for _sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(_sig, stop_event.set)
+            except (NotImplementedError, AttributeError):
+                pass
+
         try:
-            _ = await asyncio.Event().wait()
+            await stop_event.wait()
         except asyncio.CancelledError:
             pass
         finally:
-            if web_task is not None:
+            logger.info("收到退出信号，正在关闭...")
+            if web_task is not None and not web_task.done():
                 web_task.cancel()
-            _ = await runtime.stop()
+                try:
+                    await asyncio.wait_for(web_task, timeout=5.0)
+                except Exception:
+                    pass
+            await runtime.stop()
 
     return runtime
 
 
-def _resolve_webui_flag(cli_value: bool | None) -> bool:
-    """解析 WebUI 开关：CLI 参数 > 环境变量 NEKOBOT_WEBUI > 默认值 True。"""
+def _resolve_webui_flag(cli_value: bool | None) -> bool | None:
+    """解析 WebUI 开关：CLI 参数 > 环境变量 NEKOBOT_WEBUI。
+    两者均未指定时返回 None，由调用方回退到配置文件值。
+    """
     if cli_value is not None:
         return cli_value
     env = os.environ.get("NEKOBOT_WEBUI", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
     if env in ("0", "false", "no", "off"):
         return False
-    return True  # 默认启用
+    return None  # 未指定，交由配置文件决定
 
 
 def main() -> None:
@@ -130,15 +158,12 @@ def main() -> None:
     enable_webui = _resolve_webui_flag(args.webui)
 
     _configure_logging()
-    try:
-        _ = asyncio.run(async_main(
-            config_path=args.config,
-            enable_webui=enable_webui,
-            host=args.host,
-            port=args.port
-        ))
-    except KeyboardInterrupt:
-        logger.info("收到退出信号，正在关闭...")
+    asyncio.run(async_main(
+        config_path=args.config,
+        enable_webui=enable_webui,
+        host=args.host,
+        port=args.port
+    ))
 
 
 if __name__ == "__main__":

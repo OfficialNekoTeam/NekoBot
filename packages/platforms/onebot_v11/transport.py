@@ -104,6 +104,11 @@ class OneBotV11Transport:
         )
         # Yield so hypercorn can bind the socket before we return
         await asyncio.sleep(0.05)
+        if self._serve_task.done():
+            exc = self._serve_task.exception()
+            self._serve_task = None
+            self._shutdown_event = None
+            raise OSError(f"OneBot v11 transport failed to bind {self.config.host}:{self.config.port}: {exc}") from exc
         logger.info(
             "OneBot v11 transport listening on ws://{}:{}{}",
             self.config.host,
@@ -130,6 +135,8 @@ class OneBotV11Transport:
                 await asyncio.wait_for(self._serve_task, timeout=5.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._serve_task.cancel()
+            except Exception:
+                pass  # task already failed before stop was called
             self._serve_task = None
 
         logger.info("OneBot v11 transport stopped")

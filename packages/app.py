@@ -98,6 +98,8 @@ class NekoBotFramework:
         self.config_manager: ConfigManager | None = None
         # 知识库插槽：由实现了 KnowledgeStore ABC 的插件在加载时注入
         self.knowledge_store: KnowledgeStore | None = None
+        # 插件热重载器，由 bootstrap 延迟注入
+        self.plugin_reloader: PluginReloader | None = None
 
     def add_config_observer(self, observer: Callable[[BootstrapConfig], Awaitable[None]]) -> None:
         self._config_observers.append(observer)

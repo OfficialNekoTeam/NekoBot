@@ -6,7 +6,7 @@
 
 (目前项目正在处于初始阶段，因此版本号在发布正式版本之前一直保持大版本为 0.x.x。本项目遵循 [语义化版本 2.0](https://semver.org/lang/zh-CN/) 规范。有问题请及时反馈至 Issue)
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/OfficialNekoTeam/NekoBot)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/OfficialNekoTeam/NekoBot)
 [![Python](https://img.shields.io/badge/python-3.13+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-AGPL-3.0-orange.svg)](LICENSE)
 
@@ -86,6 +86,55 @@ uv run main.py
 python main.py
 ```
 
+### WebUI 管理面板
+
+启动后默认在 `http://0.0.0.0:6285` 提供 Web 管理界面，支持：
+
+- **LLM 提供商管理** - 可视化表单配置 OpenAI / Anthropic / Gemini / OpenAI Compatible
+- **插件管理** - 启用/禁用、热重载、配置编辑
+- **MCP 服务器** - 管理 Model Context Protocol 工具服务
+- **人格管理** - 管理机器人 Prompt 人格
+- **系统信息** - 实时状态、日志查看
+- **知识库** - 知识库与文档管理
+
+> ⚠️ **端口注意**：WebUI 默认占用 `6285`，OneBot V11 适配器默认占用 `6299`，两者不能使用同一端口。若在配置文件中手动为两者指定了相同端口，启动时将报 `Address already in use` 错误。
+
+### 启动参数
+
+```
+usage: main.py [--webui | --no-webui] [--config PATH] [--host HOST] [--port PORT]
+```
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--webui` / `--no-webui` | 启用或禁用 WebUI 管理面板 | 启用 |
+| `--config PATH` | 指定配置文件路径 | `data/config.json` |
+| `--host HOST` | WebUI 监听地址 | `0.0.0.0` |
+| `--port PORT` | WebUI 监听端口 | `6285` |
+
+### 环境变量
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `NEKOBOT_WEBUI` | 控制 WebUI 开关（`0/false/no/off` 禁用，`1/true/yes/on` 启用） | `NEKOBOT_WEBUI=false` |
+| `NEKOBOT_HOST` | WebUI 监听地址（同 `--host`） | `NEKOBOT_HOST=127.0.0.1` |
+| `NEKOBOT_PORT` | WebUI 监听端口（同 `--port`） | `NEKOBOT_PORT=8080` |
+| `NEKOBOT_LOG_DIR` | 日志文件目录 | `NEKOBOT_LOG_DIR=logs` |
+| `NEKOBOT_CORS_ORIGINS` | 允许的 CORS 来源，逗号分隔；`*` 表示不限制（仅开发环境） | `NEKOBOT_CORS_ORIGINS=http://localhost:3000` |
+
+**优先级**：命令行参数 > 环境变量 > `config.json` 中的 `framework_config` > 内置默认值
+
+### 配置文件（`framework_config` 节）
+
+| 字段 | 类型 | 说明 | 默认值 |
+|------|------|------|--------|
+| `web_host` | string | WebUI 监听地址 | `"0.0.0.0"` |
+| `web_port` | int | WebUI 监听端口 | `6285` |
+| `enable_webui` | bool | 是否启用 WebUI | `true` |
+| `log_level` | string | 日志级别（`DEBUG/INFO/WARNING/ERROR`） | `"INFO"` |
+| `timezone` | string | 时区 | `"Asia/Shanghai"` |
+| `api_flavor` | string | LLM API 风格（`chat_completions`） | `"chat_completions"` |
+
 ---
 
 ## 插件开发
@@ -150,8 +199,8 @@ python main.py
 - [x] 多 LLM 服务商集成
 - [x] 插件热加载系统
 - [x] 权限和会话管理
+- [x] WebUI 管理面板（提供商/插件/MCP/人格/日志/知识库）
 - [ ] 更多平台适配器 (Telegram, Discord 等)
-- [ ] WebUI 仪表盘集成
 - [ ] 知识库/RAG 功能
 - [ ] 监控和指标系统
 - [ ] 插件市场

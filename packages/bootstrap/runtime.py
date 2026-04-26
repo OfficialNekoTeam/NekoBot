@@ -339,6 +339,7 @@ async def bootstrap_runtime(
 
     # 加载插件目录
     reloader = PluginReloader(framework)
+    framework.plugin_reloader = reloader
     from pathlib import Path
     if Path(plugin_dir).exists():
         results = await reloader.load_directory(plugin_dir)
